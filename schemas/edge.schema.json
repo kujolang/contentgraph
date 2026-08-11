@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/edge.v1.json",
+  "type": "object",
+  "required": ["schema", "source", "target", "type", "method"],
+  "properties": {"schema": {"const": "contentgraph.edge/v1"}, "type": {"enum": ["internal-link", "lexical-similarity", "search-query-association", "parent-child"]}}
+}

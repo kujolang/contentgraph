@@ -1,0 +1,7 @@
+[project]
+name = "contentgraph"
+version = "0.1.0"
+entry = "contentgraph.kujo"
+
+[scripts]
+test = "kujo run tests/contentgraph_tests.kujo"
