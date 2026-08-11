@@ -2,6 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.kujolang.ai/contentgraph/graph.v1.json",
   "type": "object",
-  "required": ["schema", "run_id", "nodes", "edges", "method"],
-  "properties": {"schema": {"const": "contentgraph.graph/v1"}, "method": {"const": "deterministic-lexical/v1"}, "nodes": {"type": "array"}, "edges": {"type": "array"}}
+  "required": ["schema", "run_id", "generated_at", "nodes", "edges", "method"],
+  "properties": {"schema": {"const": "contentgraph.graph/v1"}, "method": {"const": "deterministic-lexical/v1"}, "generated_at": {"type": "string", "format": "date-time"}, "nodes": {"type": "array"}, "edges": {"type": "array"}}
 }

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import json
+import hashlib
+import random
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -48,6 +51,44 @@ class ContentGraphTests(unittest.TestCase):
         self.assertTrue(json.loads(self.run_cli("doctor").stdout)["ok"])
         self.run_cli("build",expected=1)
         self.run_cli("build","--source",ROOT/"fixtures/source","--min-similarity","2",expected=1)
+
+    def test_malformed_inputs_path_fuzz_and_read_only_boundary(self):
+        source = ROOT / "fixtures" / "source"
+        before = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in source.rglob("*") if p.is_file()}
+        rng = random.Random(20260811)
+        values = ["", "/definitely/not/here"]
+        values.extend("".join(rng.choice("%[]:/?@\\abc") for _ in range(20)) for _ in range(50))
+        for value in values:
+            result = self.run_cli("build", "--source", value, expected=1)
+            self.assertNotIn("Traceback", result.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "source"; root.mkdir()
+            (root / "bad.html").write_text("<html><title>broken<script>{not json", encoding="utf-8")
+            (root / "bad.json").write_text('{"unterminated":', encoding="utf-8")
+            self.run_cli("build", "--source", root, "--out", Path(tmp) / "run")
+        self.assertEqual(before, {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in source.rglob("*") if p.is_file()})
+
+    def test_deterministic_rerun_cache_invalidation_and_budgets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first, second = Path(tmp) / "first", Path(tmp) / "second"
+            for run in (first, second): self.run_cli("build", "--source", ROOT / "fixtures/source", "--out", run, "--deterministic")
+            for name in ("graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "metadata.json", "report.md"):
+                self.assertEqual((first / name).read_bytes(), (second / name).read_bytes(), name)
+            self.run_cli("build", "--source", ROOT / "fixtures/source", "--out", first, expected=1)
+            self.run_cli("build", "--source", ROOT / "fixtures/source", "--out", Path(tmp) / "tiny", "--max-output-bytes", "1024", expected=1)
+            self.run_cli("build", "--source", ROOT / "fixtures/source", "--max-nodes", "0", expected=1)
+
+    def test_scale_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"; source.mkdir()
+            for index in range(300):
+                (source / f"page-{index:04d}.md").write_text(f"# Page {index}\n\nshared topic group {index % 20} unique-{index}", encoding="utf-8")
+            started = time.monotonic(); run = Path(tmp) / "run"
+            self.run_cli("build", "--source", source, "--out", run, "--max-nodes", "300")
+            self.assertLess(time.monotonic() - started, 60)
+            metadata = json.loads((run / "metadata.json").read_text())
+            self.assertEqual(300, metadata["counts"]["nodes"])
+            self.assertEqual(300, metadata["budgets"]["max_nodes"])
 
 
 if __name__=="__main__": unittest.main(verbosity=2)

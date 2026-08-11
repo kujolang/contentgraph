@@ -21,11 +21,14 @@ VERSION = "0.1.0"
 METHOD = "deterministic-lexical/v1"
 MAX_FILE = 5 * 1024 * 1024
 MAX_NODES = 20_000
+DETERMINISTIC_TIME = "1970-01-01T00:00:00Z"
+DETERMINISTIC = False
 EXCLUDED = {".git", ".contentgraph", ".siteprobe", ".webops", "node_modules", "vendor", "kennel_packages", "output", "dist", "build", "__pycache__"}
 STOP = {"a","an","and","are","as","at","be","by","for","from","has","have","in","is","it","its","of","on","or","that","the","their","this","to","was","were","will","with","you","your","we","our","can","not","use","using","into","than","then","when","where","what","which","who","how"}
 
 
 def now() -> str:
+    if DETERMINISTIC: return DETERMINISTIC_TIME
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
@@ -90,19 +93,22 @@ def title_from_text(path: Path, meta: dict[str, str], body: str) -> str:
     return path.stem.replace("-", " ").replace("_", " ").title()
 
 
-def ingest_source(path_value: str) -> list[dict[str, Any]]:
-    root = Path(path_value).expanduser().resolve(); nodes = []
+def ingest_source(path_value: str, max_nodes: int = MAX_NODES) -> list[dict[str, Any]]:
+    if not path_value.strip(): raise RuntimeError("source path must not be empty")
+    root = Path(path_value).expanduser().resolve()
+    if not root.exists(): raise RuntimeError(f"source path not found: {root}")
+    nodes = []
     for path in source_files(root):
         raw = path.read_text(encoding="utf-8", errors="replace")
         meta, body = parse_frontmatter(raw); text = strip_markup(body)
         identity = meta.get("canonical") or meta.get("url") or str(path)
         rel = str(path.relative_to(root)) if root.is_dir() else path.name
         nodes.append({"schema":"contentgraph.node/v1","id":stable_id(identity),"url":meta.get("url", ""),"canonical_url":meta.get("canonical", meta.get("url", "")),"source_path":str(path),"source_relative":rel,"title":title_from_text(path, meta, body),"content_type":meta.get("type", path.suffix.lstrip(".")),"text":text,"content_fingerprint":fingerprint(text),"cluster":"","parent_id":"","child_ids":[],"incoming_links":0,"outgoing_links":0,"related_pages":[],"search_queries":[],"portfolio_state":meta.get("portfolio_state", ""),"last_material_update":meta.get("last_updated", meta.get("date", "")),"crawl_depth":None,"sitemap_member":None,"existing_targets":[]})
-        if len(nodes) >= MAX_NODES: break
+        if len(nodes) >= max_nodes: break
     return nodes
 
 
-def ingest_siteprobe(run_value: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def ingest_siteprobe(run_value: str, max_nodes: int = MAX_NODES) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     run = Path(run_value).expanduser().resolve()
     pages_path = run / "pages.jsonl"; links_path = run / "links.json"
     if not pages_path.is_file() or not links_path.is_file(): raise RuntimeError(f"invalid SiteProbe run: {run}")
@@ -116,6 +122,7 @@ def ingest_siteprobe(run_value: str) -> tuple[list[dict[str, Any]], list[dict[st
         # SiteProbe intentionally stores a primary-content fingerprint rather than full body text.
         # Metadata/headings remain the deterministic lexical input for a crawl-only graph.
         nodes.append({"schema":"contentgraph.node/v1","id":stable_id(url),"url":page.get("final_url", url),"canonical_url":url,"source_path":"","source_relative":"","title":title,"content_type":page.get("content_type", ""),"text":metadata_text,"content_fingerprint":page.get("content_fingerprint") or fingerprint(metadata_text),"cluster":"","parent_id":"","child_ids":[],"incoming_links":page.get("incoming_link_count", 0),"outgoing_links":page.get("outgoing_link_count", 0),"related_pages":[],"search_queries":[],"portfolio_state":"","last_material_update":"","crawl_depth":page.get("depth"),"sitemap_member":page.get("sitemap_member"),"existing_targets":[x.get("url") for x in page.get("internal_links", [])]})
+        if len(nodes) >= max_nodes: break
     url_to_id = {n["url"]: n["id"] for n in nodes}; url_to_id.update({n["canonical_url"]: n["id"] for n in nodes})
     edges = []
     for link in load(links_path).get("links", []):
@@ -185,10 +192,10 @@ def build(args: argparse.Namespace) -> int:
     if not args.siteprobe and not args.source: raise RuntimeError("build requires --siteprobe or --source")
     groups = []; existing_edges = []
     for value in args.siteprobe:
-        nodes, edges = ingest_siteprobe(value); groups.append(nodes); existing_edges.extend(edges)
-    for value in args.source: groups.append(ingest_source(value))
+        nodes, edges = ingest_siteprobe(value, args.max_nodes); groups.append(nodes); existing_edges.extend(edges)
+    for value in args.source: groups.append(ingest_source(value, args.max_nodes))
     nodes = merge_nodes(groups)
-    if len(nodes) > MAX_NODES: raise RuntimeError("node cap exceeded")
+    if len(nodes) > args.max_nodes: raise RuntimeError("node cap exceeded")
     vecs, signals = vectors(nodes); node_by_id = {n["id"]: n for n in nodes}; ids = sorted(node_by_id); similarities = []
     uf = UnionFind(ids)
     for i, left in enumerate(ids):
@@ -215,13 +222,17 @@ def build(args: argparse.Namespace) -> int:
     existing_pairs = {(e["source"],e["target"]) for e in existing_edges}
     opportunities = [{"id":"link-"+hashlib.sha256((x["source"]+x["target"]).encode()).hexdigest()[:16],"source":x["source"],"target":x["target"],"score":x["score"],"method":METHOD,"reason":"lexically related and not currently linked","requires_context_review":True} for x in similarities if (x["source"],x["target"]) not in existing_pairs and (x["target"],x["source"]) not in existing_pairs]
     orphans = [{"node_id":n["id"],"url":n.get("url"),"title":n["title"],"incoming_links":n["incoming_links"],"classification":"orphan" if n["incoming_links"] == 0 else "weakly-connected"} for n in nodes if n["incoming_links"] <= 1]
-    run_id = Path(args.out).name if args.out else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    out = Path(args.out or f".contentgraph/{run_id}").expanduser().resolve(); out.mkdir(parents=True, exist_ok=True)
+    run_id = "deterministic" if args.deterministic else (Path(args.out).name if args.out else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    out = Path(args.out or f".contentgraph/{run_id}").expanduser().resolve()
+    if out.exists() and any(out.iterdir()): raise RuntimeError(f"output directory must be empty: {out}")
+    out.mkdir(parents=True, exist_ok=True)
     graph = {"schema":"contentgraph.graph/v1","run_id":run_id,"generated_at":now(),"method":METHOD,"nodes":[n["id"] for n in nodes],"edges":[{"source":e["source"],"target":e["target"],"type":e["type"],"weight":e["weight"]} for e in edges]}
-    metadata = {"schema":"contentgraph.metadata/v1","run_id":run_id,"inputs":{"siteprobe":args.siteprobe,"source":args.source,"searchbridge":args.searchbridge},"thresholds":{"minimum":args.min_similarity,"cluster":args.cluster_threshold,"overlap":args.overlap_threshold},"counts":{"nodes":len(nodes),"edges":len(edges),"clusters":len(clusters),"overlaps":len(overlaps),"orphans":len(orphans),"link_opportunities":len(opportunities)}}
+    metadata = {"schema":"contentgraph.metadata/v1","run_id":run_id,"inputs":{"siteprobe":args.siteprobe,"source":args.source,"searchbridge":args.searchbridge},"thresholds":{"minimum":args.min_similarity,"cluster":args.cluster_threshold,"overlap":args.overlap_threshold},"budgets":{"max_nodes":args.max_nodes,"max_output_bytes":args.max_output_bytes,"max_report_tokens":args.max_report_tokens},"counts":{"nodes":len(nodes),"edges":len(edges),"clusters":len(clusters),"overlaps":len(overlaps),"orphans":len(orphans),"link_opportunities":len(opportunities)}}
     dump(out/"graph.json", graph); (out/"nodes.jsonl").write_text("".join(json.dumps(n,sort_keys=True)+"\n" for n in nodes),encoding="utf-8"); (out/"edges.jsonl").write_text("".join(json.dumps(e,sort_keys=True)+"\n" for e in edges),encoding="utf-8"); dump(out/"clusters.json", {"schema":"contentgraph.clusters/v1","clusters":clusters}); dump(out/"overlaps.json", {"schema":"contentgraph.overlaps/v1","overlaps":overlaps}); dump(out/"orphan-candidates.json", {"schema":"contentgraph.orphans/v1","candidates":orphans}); dump(out/"link-opportunities.json", {"schema":"contentgraph.link-opportunities/v1","opportunities":opportunities}); dump(out/"metadata.json", metadata)
-    report = ["# ContentGraph Report","",f"Run: {run_id}","","## Attention","",f"- Orphan or weak candidates: {len(orphans)}",f"- High-overlap candidates requiring intent review: {len(overlaps)}",f"- Contextual link opportunities requiring review: {len(opportunities)}","","## Coverage","",f"- Content nodes: {len(nodes)}",f"- Relationship edges: {len(edges)}",f"- Topic clusters: {len(clusters)}","",f"Method: `{METHOD}`. Full evidence remains in the run directory.",""]
+    report = ["# ContentGraph Report","",f"Run: {run_id}","","## Attention","",f"- Orphan or weak candidates: {len(orphans)}",f"- High-overlap candidates requiring intent review: {len(overlaps)}",f"- Contextual link opportunities requiring review: {len(opportunities)}","","## Coverage","",f"- Content nodes: {len(nodes)}",f"- Relationship edges: {len(edges)}",f"- Topic clusters: {len(clusters)}","",f"Method: `{METHOD}`. Full evidence remains in the run directory.",f"Report budget: {args.max_report_tokens} approximate tokens.",""]
     (out/"report.md").write_text("\n".join(report),encoding="utf-8")
+    output_bytes = sum(path.stat().st_size for path in out.iterdir() if path.is_file())
+    if output_bytes > args.max_output_bytes: raise RuntimeError(f"output budget exceeded ({output_bytes} > {args.max_output_bytes} bytes)")
     print(json.dumps({"run":str(out),"counts":metadata["counts"]},sort_keys=True) if args.json else f"ContentGraph build complete: {out}\nNodes: {len(nodes)}  Edges: {len(edges)}")
     return 0
 
@@ -258,7 +269,7 @@ def export_graph(run: Path, fmt: str) -> str:
 
 def parser() -> argparse.ArgumentParser:
     root=argparse.ArgumentParser(prog="contentgraph"); sub=root.add_subparsers(dest="command",required=True); sub.add_parser("doctor"); sub.add_parser("version")
-    p=sub.add_parser("build"); p.add_argument("--siteprobe",action="append",default=[]); p.add_argument("--source",action="append",default=[]); p.add_argument("--searchbridge",action="append",default=[]); p.add_argument("--out"); p.add_argument("--min-similarity",type=float,default=0.12); p.add_argument("--cluster-threshold",type=float,default=0.20); p.add_argument("--overlap-threshold",type=float,default=0.55); p.add_argument("--json",action="store_true")
+    p=sub.add_parser("build"); p.add_argument("--siteprobe",action="append",default=[]); p.add_argument("--source",action="append",default=[]); p.add_argument("--searchbridge",action="append",default=[]); p.add_argument("--out"); p.add_argument("--min-similarity",type=float,default=0.12); p.add_argument("--cluster-threshold",type=float,default=0.20); p.add_argument("--overlap-threshold",type=float,default=0.55); p.add_argument("--max-nodes",type=int,default=5000); p.add_argument("--max-output-bytes",type=int,default=256 * 1024 * 1024); p.add_argument("--max-report-tokens",type=int,default=2000); p.add_argument("--deterministic",action="store_true"); p.add_argument("--json",action="store_true")
     p=sub.add_parser("inspect"); p.add_argument("run"); p.add_argument("--node",required=True)
     p=sub.add_parser("related"); p.add_argument("run"); p.add_argument("--node",required=True); p.add_argument("--limit",type=int,default=10)
     for name in ("orphans","clusters","overlaps","link-opportunities"):
@@ -269,13 +280,17 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    global DETERMINISTIC
     args=parser().parse_args()
     try:
         if args.command=="version": print(json.dumps({"name":"contentgraph","version":VERSION,"contract":"contentgraph.graph/v1","method":METHOD})); return 0
         if args.command=="doctor": print(json.dumps({"ok":True,"network_required":False,"paid_api_required":False,"method":METHOD,"max_nodes":MAX_NODES},sort_keys=True)); return 0
         if args.command=="build":
+            DETERMINISTIC = args.deterministic
             for x in (args.min_similarity,args.cluster_threshold,args.overlap_threshold):
                 if x<0 or x>1: raise RuntimeError("similarity thresholds must be between 0 and 1")
+            if args.max_nodes < 1 or args.max_nodes > MAX_NODES: raise RuntimeError(f"--max-nodes must be between 1 and {MAX_NODES}")
+            if args.max_output_bytes < 1024 or args.max_report_tokens < 64: raise RuntimeError("output budgets are below safe minimums")
             return build(args)
         if args.command=="compare": print(json.dumps(compare(Path(args.old).resolve(),Path(args.new).resolve()),indent=2,sort_keys=True)); return 0
         run=Path(args.run).resolve(); validate_run(run)
