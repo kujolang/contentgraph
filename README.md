@@ -20,7 +20,10 @@ corpus; ContentGraph builds the inspectable content network between them.
 
 `build` accepts one or more `--siteprobe`, `--source`, and `--searchbridge`
 inputs. Source discovery is bounded to Markdown, HTML, JSON, and text files
-under the supplied roots and ignores generated/dependency directories.
+under the supplied roots and ignores generated/dependency directories. Every
+build has explicit node, artifact-byte, and report-token budgets; stale output
+directories are rejected. `--deterministic` produces byte-comparable fixture
+runs. All commands are local/offline and source inputs remain read-only.
 
 ## Commands
 
@@ -60,4 +63,7 @@ See [methodology](docs/methodology.md), [agent integration](docs/agent-integrati
 
 ```bash
 bash scripts/validate.sh
+python3 scripts/benchmark.py --nodes 1000
 ```
+
+See [the 0.1.0 release qualification](docs/release-qualification-0.1.0.md).
