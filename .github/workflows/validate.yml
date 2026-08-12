@@ -33,16 +33,16 @@ jobs:
           "OPENSSL_DIR=$opensslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           "OPENSSL_LIB_DIR=$opensslRoot\lib\VC\x64\MD" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build Kujo
-        run: cargo build --locked --manifest-path kujo-runtime/Cargo.toml
+        run: cargo build --release --locked --manifest-path kujo-runtime/Cargo.toml
       - name: Validate native ContentGraph
         shell: bash
         env:
-          KUJO_BIN: ${{ github.workspace }}/kujo-runtime/target/debug/kujo${{ runner.os == 'Windows' && '.exe' || '' }}
+          KUJO_BIN: ${{ github.workspace }}/kujo-runtime/target/release/kujo${{ runner.os == 'Windows' && '.exe' || '' }}
           CONTENTGRAPH_WINDOWS_LAUNCHER: ${{ runner.os == 'Windows' && '1' || '0' }}
         run: bash scripts/validate.sh
       - name: Validate Windows launcher
         if: runner.os == 'Windows'
         shell: cmd
         env:
-          KUJO_BIN: ${{ github.workspace }}\kujo-runtime\target\debug\kujo.exe
+          KUJO_BIN: ${{ github.workspace }}\kujo-runtime\target\release\kujo.exe
         run: contentgraph.cmd doctor --json
