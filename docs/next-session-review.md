@@ -1,55 +1,23 @@
-# Next-session engineering review
+# Engineering review completion record
 
-This is the prioritized follow-up list after the production-hardening review.
-Items are intentionally unimplemented; each needs its own scoped design and
-verification pass.
+All items from the 2026-08-12 production-hardening follow-up were implemented
+for ContentGraph 0.2.0.
 
-## P0 — Kujo showcase and contract integrity
+| Area | Completed evidence |
+| --- | --- |
+| Native Kujo engine | `src/text.kujo`, `src/ingest.kujo`, `src/engine.kujo`, `src/analytics.kujo`; Python engine removed; byte-golden suite retained. |
+| Runtime contracts | `src/contracts.kujo` validates inputs, configuration, stored runs, and emitted artifacts. |
+| Versioned configuration | `contentgraph.config/v1`, TOML/JSON support, unknown-key rejection, CLI precedence tests. |
+| Bounded scale | Streaming per-source top-k scores, candidate cap, high-frequency term filter, and measured 5k/10k/20k CPU/RSS qualification results. |
+| Interoperability | SiteProbe, SearchBridge, sitemap/XML, CSV, and `contentgraph.cms-export/v1`. |
+| GraphML | Search query nodes and edges are emitted without dangling endpoints. |
+| Analysis | Components, degree centrality, bridge pages, hubs, authorities, crawl-depth drift, and cluster health in `analysis.json`. |
+| Incremental builds | Input/config fingerprints, cache hit reuse, invalidation, and clean-build byte equivalence tests. |
+| Releases | Reproducible Kujo packager, SHA-256 checksums, CycloneDX SBOM, provenance, GitHub OIDC attestations, and tag-driven release publishing. |
+| Platforms | Linux, macOS, and Windows CI matrix with native Kujo validation. |
+| Robustness | Native property, differential, malformed-contract, resource, duplicate-canonical, Unicode, and high-cardinality tests. |
+| Presentation | Public fixture corpus, checked-in golden report, platform matrix, upgrade/rollback guide, and machine-readable doctor report. |
 
-- Port tokenization, frontmatter extraction, sparse TF-IDF scoring, union-find,
-  and artifact serialization from `src/contentgraph.py` into Kujo modules. Keep
-  golden fixtures proving byte-level compatibility before removing Python.
-- Add runtime JSON Schema validation of every emitted artifact and accepted
-  SiteProbe/SearchBridge contract. The repository currently validates schema
-  syntax, while Python tests assert selected output fields.
-- Define a versioned configuration file contract so enterprise users can store
-  thresholds and budgets without long command lines; specify CLI-over-config
-  precedence and reject unknown keys.
-
-## P1 — Scale, interoperability, and analysis depth
-
-- Replace the in-memory candidate-score map with a bounded streaming/top-k
-  accumulator and profile 5k, 10k, and 20k-node corpora with high-frequency
-  terms. Preserve deterministic ordering across worker counts.
-- Add sitemap/XML, CSV, and structured CMS export adapters behind explicit,
-  versioned input contracts; do not turn ContentGraph into a crawler.
-- Emit GraphML query nodes or a documented separate query-edge export so search
-  associations are represented without dangling endpoints.
-- Add component-level centrality, bridge-page, hub/authority, crawl-depth drift,
-  and cluster-health reports with deterministic methods and bounded complexity.
-- Add incremental builds keyed by input fingerprints, including explicit cache
-  invalidation and equivalence tests against clean builds.
-
-## P2 — Enterprise operations and presentation
-
-- Publish signed, reproducible Kujo/ContentGraph release artifacts with an SBOM,
-  checksums, provenance, supported-platform matrix, and rollback instructions.
-- Add Windows validation plus macOS/Linux release-matrix tests for path,
-  encoding, executable-launcher, and GraphML behavior.
-- Add property-based artifact invariants and differential tests for comparison,
-  clustering, duplicate canonical URLs, Unicode normalization, and adversarial
-  high-cardinality metadata.
-- Create a small public demonstration corpus and checked-in expected report so
-  prospective Kujo users can understand the value without supplying private
-  site data.
-- Add a machine-readable `doctor --json` compatibility report covering Kujo and
-  Python versions, filesystem permissions, and safe resource-limit guidance.
-
-## Exit criteria for an enterprise-readiness claim
-
-- The deterministic engine is native Kujo or the remaining compatibility layer
-  has a published support/deprecation policy.
-- Schema validation, cross-platform CI, reproducible signed releases, SBOM, and
-  large-corpus performance envelopes are independently repeatable.
-- No high-severity security findings are open, upgrade/rollback procedures are
-  documented, and all public contracts have backward-compatibility tests.
+The next product review should be driven by real user feedback and measured
+production corpora rather than carrying forward any unchecked item from this
+list.

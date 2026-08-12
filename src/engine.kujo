@@ -344,6 +344,19 @@ func cleanup_staging(staging, names) {
     if path_exists(staging) { os_rmdir(staging) }
 }
 
+func write_artifact_chunks(path, content) {
+    # Kujo's untrusted per-write ceiling is intentionally smaller than the run
+    # ceiling. Stream bounded chunks so valid 20k-node JSONL remains supported.
+    write_file(path,"")
+    offset:=0
+    loop {
+        if offset>=len(content){break}
+        next:=min(offset+524288,len(content))
+        append_file(path,substring(content,offset,next))
+        offset=next
+    }
+}
+
 func publish_artifacts(out, artifacts, maximum) {
     if path_exists(out) { fail("output path already exists: " + out) }
     parent := dirname(out)
@@ -352,10 +365,15 @@ func publish_artifacts(out, artifacts, maximum) {
     create_dir(staging)
     names := sort(keys(artifacts))
     total := 0
-    for name in names {
-        path := path_join(staging, name)
-        write_file(path, artifacts[name])
-        total = total + file_size(path)
+    try {
+        for name in names {
+            path := path_join(staging, name)
+            write_artifact_chunks(path,artifacts[name])
+            total = total + file_size(path)
+        }
+    } except error {
+        cleanup_staging(staging,names)
+        fail("artifact write failed: "+substring(to_string(error),0,min(200,len(to_string(error)))))
     }
     if total > maximum {
         cleanup_staging(staging, names)
