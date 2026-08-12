@@ -6,11 +6,30 @@ permissions:
   contents: read
 jobs:
   deterministic-graph:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout Kujo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          python-version: "3.12"
-      - run: python3 tests/test_contentgraph.py
-      - run: python3 -m py_compile src/contentgraph.py
+          repository: kujolang/kujo
+          ref: v1.0.1
+          path: kujo-runtime
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-08-12
+      - name: Build Kujo
+        run: cargo build --release --locked --manifest-path kujo-runtime/Cargo.toml
+      - name: Validate native ContentGraph
+        shell: bash
+        env:
+          KUJO_BIN: ${{ github.workspace }}/kujo-runtime/target/release/kujo${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: bash scripts/validate.sh
+      - name: Validate Windows launcher
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          KUJO_BIN: ${{ github.workspace }}\kujo-runtime\target\release\kujo.exe
+        run: contentgraph.cmd doctor --json

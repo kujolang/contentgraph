@@ -1,0 +1,65 @@
+# Reproducible release bundle, checksum, CycloneDX SBOM, and provenance generator.
+version:=trim(read_file("VERSION"))
+dist:="dist"
+create_dir(dist)
+archive_path:=path_join(dist,"contentgraph-"+version+".tar.gz")
+tar_path:=path_join(dist,"contentgraph-"+version+".tar")
+sbom_path:=path_join(dist,"contentgraph-"+version+".cdx.json")
+provenance_path:=path_join(dist,"contentgraph-"+version+".provenance.json")
+checksums_path:=path_join(dist,"SHA256SUMS")
+for path in [archive_path,tar_path,sbom_path,provenance_path,checksums_path] { if path_exists(path){delete_file(path)} }
+
+func collect_files(directory) {
+    result:=[]
+    for name in sort(list_dir(directory)) {
+        if name=="__pycache__" || name==".DS_Store" { continue }
+        path:=path_join(directory,name)
+        if path_is_file(path) { result=push(result,path) }
+        else if path_is_dir(path) { result=concat(result,collect_files(path)) }
+    }
+    return result
+}
+files:=["VERSION","LICENSE","README.md","CHANGELOG.md","kujo.toml","contentgraph","contentgraph.cmd","contentgraph-benchmark","contentgraph.example.toml"]
+for directory in ["src","schemas","scripts","docs","examples","fixtures","tests"] { files=concat(files,collect_files(directory)) }
+components:=[]
+for path in files { components=push(components,{"type":"file","name":path,"hashes":[{"alg":"SHA-256","content":sha256_file(path)}]}) }
+components=push(components,{"type":"framework","name":"kujo","version":"1.0.1","purl":"pkg:github/kujolang/kujo@v1.0.1","licenses":[{"license":{"id":"MIT"}}]})
+seed:=sha256("contentgraph:"+version)
+serial:=substring(seed,0,8)+"-"+substring(seed,8,12)+"-"+substring(seed,12,16)+"-"+substring(seed,16,20)+"-"+substring(seed,20,32)
+sbom:={"bomFormat":"CycloneDX","specVersion":"1.5","serialNumber":"urn:uuid:"+serial,"version":1,"metadata":{"component":{"type":"application","name":"contentgraph","version":version,"licenses":[{"license":{"id":"MIT"}}]},"properties":[{"name":"contentgraph.engine","value":"kujo"}]},"components":components}
+write_file(sbom_path,to_json_pretty(sbom)+"\n")
+
+commit:=trim(spawn_process(["git","rev-parse","HEAD"],{"timeout_ms":5000,"max_output_bytes":4096}).stdout)
+provenance:={"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"contentgraph-"+version,"digest":{"gitCommit":commit}}],"predicateType":"https://slsa.dev/provenance/v1","predicate":{"buildDefinition":{"buildType":"https://github.com/kujolang/contentgraph/release/v1","externalParameters":{"version":version},"internalParameters":{"engine":"kujo"},"resolvedDependencies":[]},"runDetails":{"builder":{"id":"https://github.com/kujolang/contentgraph/actions/workflows/release.yml"},"metadata":{"invocationId":"local-or-github-actions"}}}}
+write_file(provenance_path,to_json_pretty(provenance)+"\n")
+
+stage:=path_join("/tmp","contentgraph-release-"+uuid_v4())
+bundle_name:="contentgraph-"+version
+bundle:=path_join(stage,bundle_name)
+create_dir(bundle)
+for path in files {
+    destination:=path_join(bundle,path)
+    create_dir(dirname(destination))
+    copy_file(path,destination)
+    spawn_process(["touch","-t","197001010000",destination],{"timeout_ms":5000,"max_output_bytes":4096})
+}
+copy_file(sbom_path,path_join(bundle,basename(sbom_path)))
+copy_file(provenance_path,path_join(bundle,basename(provenance_path)))
+spawn_process(["touch","-t","197001010000",path_join(bundle,basename(sbom_path))],{"timeout_ms":5000,"max_output_bytes":4096})
+spawn_process(["touch","-t","197001010000",path_join(bundle,basename(provenance_path))],{"timeout_ms":5000,"max_output_bytes":4096})
+stage_directories:=["src","schemas","scripts","docs","examples","fixtures/golden/run","fixtures/golden","fixtures/adapters","fixtures/source","fixtures","tests",""]
+for directory in stage_directories { spawn_process(["touch","-t","197001010000",path_join(bundle,directory)],{"timeout_ms":5000,"max_output_bytes":4096}) }
+archive_result:=spawn_process(["tar","-cf",tar_path,"--sort=name","--mtime=1970-01-01T00:00:00Z","--owner=0","--group=0","--numeric-owner","-C",stage,bundle_name],{"timeout_ms":120000,"max_output_bytes":65536})
+if archive_result.exitcode!=0 {
+    # BSD tar sees the same sorted, epoch-stamped staging tree.
+    archive_result=spawn_process(["tar","-cf",tar_path,"--format","ustar","--no-xattrs","-C",stage,bundle_name],{"timeout_ms":120000,"max_output_bytes":65536})
+}
+if archive_result.exitcode!=0 { eprint("ContentGraph release: "+archive_result.stderr); exit(1) }
+gzip_result:=spawn_process(["gzip","-n","-f",tar_path],{"timeout_ms":120000,"max_output_bytes":65536})
+if gzip_result.exitcode!=0 { eprint("ContentGraph release: "+gzip_result.stderr); exit(1) }
+# Delete only the UUID-scoped staging tree created above.
+cleanup:=spawn_process(["find",stage,"-depth","-delete"],{"timeout_ms":30000,"max_output_bytes":4096})
+if cleanup.exitcode!=0 { eprint("ContentGraph release staging cleanup failed: "+cleanup.stderr); exit(1) }
+checksum:=sha256_file(archive_path)
+write_file(checksums_path,checksum+"  "+basename(archive_path)+"\n"+sha256_file(sbom_path)+"  "+basename(sbom_path)+"\n"+sha256_file(provenance_path)+"  "+basename(provenance_path)+"\n")
+print(to_json({"schema":"contentgraph.release-bundle/v1","version":version,"archive":archive_path,"sha256":checksum,"sbom":sbom_path,"provenance":provenance_path,"checksums":checksums_path}))
