@@ -10,9 +10,9 @@ blocked
 
 ## Verification
 
-- passed: benchmark, release_bundle, benchmark, release_bundle, benchmark, release_bundle
+- passed: validation, benchmark, release_bundle, validation, benchmark, release_bundle, validation, benchmark, release_bundle
 - blocked: none
-- failed: validation, diff_check, validation, diff_check, validation, diff_check
+- failed: diff_check, diff_check, diff_check
 
 ## Commits
 
