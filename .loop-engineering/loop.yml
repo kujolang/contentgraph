@@ -1,5 +1,5 @@
-objective: "Review and harden ContentGraph for production use, improve performance/security/functionality, normalize the src layout, increase direct Kujo tooling, update documentation, and leave a verified next-session backlog."
-checklist_file: ""
+objective: "Complete every item and exit criterion in docs/next-session-review.md for ContentGraph 0.2.0."
+checklist_file: "docs/next-session-review.md"
 max_iterations: 8
 max_no_progress: 2
 max_consecutive_failures: 3
@@ -22,6 +22,10 @@ eval_gates:
 
   - id: benchmark
     command: "./contentgraph-benchmark --nodes 1000"
+    required: true
+
+  - id: release_bundle
+    command: "../kujo/target/release/kujo run scripts/package-release.kujo"
     required: true
 
   - id: diff_check
