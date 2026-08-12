@@ -27,7 +27,9 @@ write_file(source,"id,title,url,content\n")
 i = 0
 loop {
     if i >= node_count { break }
-    body := to_string(i) + ",Page " + to_string(i) + ",https://example.com/page-" + to_string(i) + ",shared highfrequency topic corpus\n"
+    # Common terms exercise filtering; adjacent bridge terms keep the retained
+    # workload sparse while forming one deterministic component at every size.
+    body := to_string(i) + ",Page " + to_string(i) + ",https://example.com/page-" + to_string(i) + ",shared highfrequency topic corpus bridge_" + to_string(i) + " bridge_" + to_string(i+1) + "\n"
     append_file(source, body)
     i = i + 1
 }
