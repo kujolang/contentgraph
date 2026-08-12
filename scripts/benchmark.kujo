@@ -29,7 +29,7 @@ loop {
     if i >= node_count { break }
     # Common terms exercise filtering; adjacent bridge terms keep the retained
     # workload sparse while forming one deterministic component at every size.
-    body := to_string(i) + ",Page " + to_string(i) + ",https://example.com/page-" + to_string(i) + ",shared highfrequency topic corpus bridge_" + to_string(i) + " bridge_" + to_string(i+1) + "\n"
+    body := to_string(i) + ",Page " + to_string(i) + ",https://example.com/page-" + to_string(i) + ",shared highfrequency topic corpus bridge" + to_string(i) + " bridge" + to_string(i+1) + "\n"
     append_file(source, body)
     i = i + 1
 }
@@ -61,7 +61,7 @@ artifact_names := ["graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", 
 output_bytes := 0
 for name in artifact_names { output_bytes = output_bytes + file_size(out + "/" + name) }
 build_result := parse_json(result.stdout)
-print(to_json({"schema":"contentgraph.benchmark/v1", "nodes":node_count, "seconds":elapsed, "peak_rss_bytes":peak_rss_bytes, "output_bytes":output_bytes, "candidate_pairs":build_result["usage"]["candidate_pairs"], "retained_similarity_pairs":build_result["usage"]["retained_similarity_pairs"], "harness":"kujo", "engine":"kujo"}))
+print(to_json({"schema":"contentgraph.benchmark/v1", "nodes":node_count, "seconds":elapsed, "peak_rss_bytes":peak_rss_bytes, "output_bytes":output_bytes, "candidate_pairs":build_result["usage"]["candidate_pairs"], "retained_similarity_pairs":build_result["usage"]["retained_similarity_pairs"], "skipped_high_frequency_terms":build_result["usage"]["skipped_high_frequency_terms"], "harness":"kujo", "engine":"kujo"}))
 
 # Remove only the UUID-scoped temporary tree created above.
 for name in artifact_names { delete_file(out + "/" + name) }
