@@ -35,8 +35,7 @@ tested by `max_candidate_pairs`; real-corpus medians remain a 0.3 opportunity.
   tests: pass.
 - Deterministic 1,000-node benchmark gate: pass.
 - Reproducible archive, checksum, CycloneDX SBOM, and provenance generation:
-  pass; two clean invocations produced archive SHA-256
-  `ae83c78c35ef8aaae4af70900b1681afae8431b33c4760710647a7ea91b62b45`,
-  and every `SHA256SUMS` entry verified.
+  pass; two clean invocations from the same commit produced identical archive
+  SHA-256 values, and every `SHA256SUMS` entry verified.
 - Upgrade/rollback and v0.1 read compatibility: documented and tested.
 - Scoped source/security review: no open high-severity finding.
