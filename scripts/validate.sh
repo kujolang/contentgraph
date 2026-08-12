@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KUJO_RUNTIME="${KUJO_BIN:-$ROOT/../kujo/target/release/kujo}"
+export CONTENTGRAPH_KUJO_BIN="$KUJO_RUNTIME"
 cd "$ROOT"
 "$KUJO_RUNTIME" check src/main.kujo
 "$KUJO_RUNTIME" check src/text.kujo
