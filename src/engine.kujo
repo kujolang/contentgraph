@@ -289,11 +289,26 @@ func build_clusters(ids, parent, signals, node_map) {
 
 func pair_has(pairs, source, target) { return has_key(pairs, source + "|" + target) }
 
-func render_json(value) { return to_json_pretty(value) + "\n" }
+func canonical_json(value) {
+    kind := type_of(value)
+    if kind == "dict" {
+        members:=[]
+        for key in sort(keys(value)) { members=push(members,to_json(key)+":"+canonical_json(value[key])) }
+        return "{"+join(members,",")+"}"
+    }
+    if kind == "array" {
+        members:=[]
+        for item in value { members=push(members,canonical_json(item)) }
+        return "["+join(members,",")+"]"
+    }
+    return to_json(value)
+}
+
+func render_json(value) { return canonical_json(value) + "\n" }
 
 func render_jsonl(values) {
     lines := range(0,len(values)); index:=0
-    for value in values { lines[index] = to_json(value); index=index+1 }
+    for value in values { lines[index] = canonical_json(value); index=index+1 }
     if len(lines) == 0 { return "" }
     return join(lines, "\n") + "\n"
 }
@@ -387,7 +402,7 @@ func input_fingerprint(budget, options) {
     records := []
     for file in budget["files"] { records = push(records, file["path"] + ":" + file["sha256"] + ":" + to_string(file["bytes"])) }
     settings := {"min_similarity":options["min_similarity"],"cluster_threshold":options["cluster_threshold"],"overlap_threshold":options["overlap_threshold"],"max_related_per_node":options["max_related_per_node"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"],"max_analysis_items":options["max_analysis_items"]}
-    return sha256(join(sort(records), "\n") + "\n" + to_json(settings))
+    return sha256(join(sort(records), "\n") + "\n" + canonical_json(settings))
 }
 
 func try_incremental(options, fingerprint_value) {
