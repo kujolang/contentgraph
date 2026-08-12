@@ -16,7 +16,11 @@ cd "$ROOT"
 "$KUJO_RUNTIME" check scripts/validate-schemas.kujo
 for source in src/*.kujo scripts/*.kujo tests/*.kujo; do "$KUJO_RUNTIME" lint "$source" >/dev/null; done
 "$KUJO_RUNTIME" run tests/contentgraph_tests.kujo
-./contentgraph doctor >/dev/null
+if [[ "${CONTENTGRAPH_WINDOWS_LAUNCHER:-}" == "1" ]]; then
+  cmd.exe /d /c contentgraph.cmd doctor >/dev/null
+else
+  ./contentgraph doctor >/dev/null
+fi
 "$KUJO_RUNTIME" run scripts/validate-schemas.kujo
 bash scripts/diff-check.sh
 printf 'ContentGraph validation passed.\n'

@@ -33,6 +33,7 @@ jobs:
         shell: bash
         env:
           KUJO_BIN: ${{ github.workspace }}/kujo-runtime/target/release/kujo${{ runner.os == 'Windows' && '.exe' || '' }}
+          CONTENTGRAPH_WINDOWS_LAUNCHER: ${{ runner.os == 'Windows' && '1' || '0' }}
         run: bash scripts/validate.sh
       - name: Validate Windows launcher
         if: runner.os == 'Windows'

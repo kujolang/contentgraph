@@ -10,7 +10,9 @@ func check_true(value) { if !value { eprint("check_true failed"); exit(1) } }
 func check_false(value) { if value { eprint("check_false failed"); exit(1) } }
 
 func run_cli(arguments, expected) {
-    result := spawn_process(concat(["./contentgraph"],arguments),{"timeout_ms":180000,"max_output_bytes":1048576})
+    launcher := ["./contentgraph"]
+    if env("CONTENTGRAPH_WINDOWS_LAUNCHER")=="1" { launcher=["cmd.exe","/d","/c","contentgraph.cmd"] }
+    result := spawn_process(concat(launcher,arguments),{"timeout_ms":180000,"max_output_bytes":1048576})
     check_equal(result.exitcode,expected)
     return result
 }
