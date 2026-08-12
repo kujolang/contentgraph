@@ -26,6 +26,7 @@ jobs:
         run: |
           $opensslRoot = Split-Path (Split-Path (Get-Command openssl).Source)
           "OPENSSL_DIR=$opensslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OPENSSL_LIB_DIR=$opensslRoot\lib\VC\x64\MD" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build Kujo
         run: cargo build --release --locked --manifest-path kujo-runtime/Cargo.toml
       - name: Validate native ContentGraph
