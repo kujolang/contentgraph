@@ -1,0 +1,23 @@
+# Context
+
+- objective: Review and harden ContentGraph for production use, improve performance/security/functionality, normalize the src layout, increase direct Kujo tooling, update documentation, and leave a verified next-session backlog.
+- git_head: d40a3cf
+- changed_files:
+  - .github/workflows/validate.yml
+  - CHANGELOG.md
+  - README.md
+  - contentgraph
+  - docs/methodology.md
+  - docs/release-qualification-0.1.0.md
+  - docs/security.md
+  - kujo.toml
+  - schemas/edge.schema.json
+  - schemas/graph.schema.json
+  - schemas/node.schema.json
+  - scripts/benchmark.kujo
+  - scripts/benchmark.py
+  - scripts/validate.sh
+  - src/contentgraph.py
+  - src/main.kujo
+  - tests/contentgraph_tests.kujo
+  - tests/test_contentgraph.py

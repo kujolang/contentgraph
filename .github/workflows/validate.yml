@@ -13,4 +13,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 tests/test_contentgraph.py
-      - run: python3 -m py_compile bridge/contentgraph.py
+      - run: python3 -m py_compile src/contentgraph.py

@@ -1,0 +1,56 @@
+# Native Kujo benchmark harness for ContentGraph.
+func fail(message) {
+    print("ContentGraph benchmark: " + message)
+    exit(1)
+}
+
+node_count := 1000
+argv := args()
+i := 0
+loop {
+    if i >= len(argv) { break }
+    if argv[i] == "--nodes" && i + 1 < len(argv) {
+        node_count = to_int(argv[i + 1])
+        i = i + 2
+    } else {
+        fail("usage: contentgraph-benchmark [--nodes COUNT]")
+    }
+}
+if node_count < 1 || node_count > 20000 { fail("--nodes must be between 1 and 20000") }
+
+root := "/tmp/contentgraph-benchmark-" + uuid_v4()
+source := root + "/source"
+out := root + "/run"
+create_dir(root)
+create_dir(source)
+
+i = 0
+loop {
+    if i >= node_count { break }
+    name := source + "/page-" + to_string(i) + ".md"
+    body := "# Page " + to_string(i) + "\n\nshared topic " + to_string(i % 50) + " unique-" + to_string(i) + "\n"
+    write_file(name, body)
+    i = i + 1
+}
+
+started := performance_now()
+result := spawn_process(["python3", "src/contentgraph.py", "build", "--source", source, "--out", out, "--max-nodes", to_string(node_count), "--deterministic", "--json"], {"timeout_ms": 600000})
+elapsed := (performance_now() - started) / 1000.0
+if result.exitcode != 0 { fail(trim(result.stderr + "\n" + result.stdout)) }
+
+artifact_names := ["graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "metadata.json", "report.md"]
+output_bytes := 0
+for name in artifact_names { output_bytes = output_bytes + file_size(out + "/" + name) }
+print(to_json({"schema":"contentgraph.benchmark/v1", "nodes":node_count, "seconds":elapsed, "output_bytes":output_bytes, "harness":"kujo"}))
+
+# Remove only the UUID-scoped temporary tree created above.
+for name in artifact_names { delete_file(out + "/" + name) }
+os_rmdir(out)
+i = 0
+loop {
+    if i >= node_count { break }
+    delete_file(source + "/page-" + to_string(i) + ".md")
+    i = i + 1
+}
+os_rmdir(source)
+os_rmdir(root)

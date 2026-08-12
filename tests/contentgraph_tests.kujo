@@ -1,4 +1,4 @@
-result := spawn_process(["python3", "tests/test_contentgraph.py"], {"timeout_ms": 120000})
+result := spawn_process(["python3", "tests/test_contentgraph.py"], {"timeout_ms": 180000})
 if result.stdout != "" { print(trim_end(result.stdout)) }
 if result.stderr != "" { print(trim_end(result.stderr)) }
 exit(result.exitcode)

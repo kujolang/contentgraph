@@ -1,7 +1,7 @@
-# ContentGraph's Kujo entrypoint. The bridge supplies deterministic local text
-# parsing and sparse lexical math until Kujo exposes equivalent libraries.
+# ContentGraph's Kujo entrypoint. The compatibility engine supplies deterministic
+# local text parsing and sparse lexical math while those pieces are ported to Kujo.
 func main() {
-	command := ["python3", "bridge/contentgraph.py"]
+	command := ["python3", "src/contentgraph.py"]
 	argv := args()
 	i := 0
 	loop {

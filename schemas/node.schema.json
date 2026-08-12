@@ -1,7 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.kujolang.ai/contentgraph/node.v1.json",
+  "title": "ContentGraph node v1",
   "type": "object",
-  "required": ["schema", "id", "title", "content_fingerprint", "topic_signals", "incoming_links", "outgoing_links"],
-  "properties": {"schema": {"const": "contentgraph.node/v1"}, "id": {"type": "string"}}
+  "required": ["schema", "id", "title", "content_fingerprint", "topic_signals", "incoming_links", "outgoing_links", "related_pages"],
+  "properties": {
+    "schema": {"const": "contentgraph.node/v1"},
+    "id": {"type": "string", "pattern": "^CG-[a-f0-9]{20}$"},
+    "title": {"type": "string"},
+    "source_path": {"type": "string"},
+    "source_relative": {"type": "string"},
+    "content_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "topic_signals": {"type": "array", "items": {"type": "string"}},
+    "incoming_links": {"type": "integer", "minimum": 0},
+    "outgoing_links": {"type": "integer", "minimum": 0},
+    "related_pages": {"type": "array"}
+  }
 }

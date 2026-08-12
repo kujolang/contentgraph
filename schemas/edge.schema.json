@@ -1,7 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.kujolang.ai/contentgraph/edge.v1.json",
+  "title": "ContentGraph edge v1",
   "type": "object",
-  "required": ["schema", "source", "target", "type", "method"],
-  "properties": {"schema": {"const": "contentgraph.edge/v1"}, "type": {"enum": ["internal-link", "lexical-similarity", "search-query-association", "parent-child"]}}
+  "additionalProperties": false,
+  "required": ["schema", "source", "target", "type", "method", "weight", "evidence"],
+  "properties": {
+    "schema": {"const": "contentgraph.edge/v1"},
+    "source": {"type": "string", "minLength": 1},
+    "target": {"type": "string", "minLength": 1},
+    "type": {"enum": ["internal-link", "lexical-similarity", "search-query-association", "parent-child"]},
+    "method": {"enum": ["deterministic-lexical/v1", "existing-internal-link", "measured-provider-evidence"]},
+    "weight": {"type": "number", "minimum": 0},
+    "evidence": {"type": "object"}
+  }
 }

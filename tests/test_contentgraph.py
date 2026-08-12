@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import random
+import shutil
 import subprocess
 import tempfile
 import time
@@ -10,7 +11,7 @@ import unittest
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-CLI=ROOT/"bridge"/"contentgraph.py"
+CLI=ROOT/"src"/"contentgraph.py"
 
 
 class ContentGraphTests(unittest.TestCase):
@@ -36,7 +37,13 @@ class ContentGraphTests(unittest.TestCase):
             self.assertIn("graphml",self.run_cli("export",run,"--format","graphml").stdout)
             nodes=[json.loads(x) for x in (run/"nodes.jsonl").read_text().splitlines()]
             self.run_cli("inspect",run,"--node",nodes[0]["id"])
-            self.run_cli("related",run,"--node",nodes[0]["id"])
+            related=json.loads(self.run_cli("related",run,"--node",nodes[0]["id"]).stdout)["related"]
+            self.assertEqual(related, sorted(related, key=lambda x: (-x["score"], x["node_id"])))
+            export=Path(tmp)/"graph.graphml"
+            self.run_cli("export",run,"--format","graphml","--out",export)
+            self.run_cli("export",run,"--format","graphml","--out",export,expected=1)
+            self.run_cli("export",run,"--format","graphml","--out",export,"--force")
+            self.assertIn('<key id="title"', export.read_text())
 
     def test_siteprobe_ingestion_orphans_and_compare(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -46,6 +53,7 @@ class ContentGraphTests(unittest.TestCase):
             self.assertTrue(any(x["url"].endswith("/orphan") for x in candidates))
             self.run_cli("build","--source",ROOT/"fixtures/source","--out",run2)
             comparison=json.loads(self.run_cli("compare",run1,run2).stdout); self.assertTrue(comparison["changes"])
+            self.assertTrue(any(x["type"].startswith("EDGE_") for x in comparison["changes"]))
 
     def test_doctor_and_invalid_input(self):
         self.assertTrue(json.loads(self.run_cli("doctor").stdout)["ok"])
@@ -75,8 +83,27 @@ class ContentGraphTests(unittest.TestCase):
             for name in ("graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "metadata.json", "report.md"):
                 self.assertEqual((first / name).read_bytes(), (second / name).read_bytes(), name)
             self.run_cli("build", "--source", ROOT / "fixtures/source", "--out", first, expected=1)
-            self.run_cli("build", "--source", ROOT / "fixtures/source", "--out", Path(tmp) / "tiny", "--max-output-bytes", "1024", expected=1)
+            tiny = Path(tmp) / "tiny"
+            self.run_cli("build", "--source", ROOT / "fixtures/source", "--out", tiny, "--max-output-bytes", "1024", expected=1)
+            self.assertFalse(tiny.exists(), "budget failure must not leave a partial run")
             self.run_cli("build", "--source", ROOT / "fixtures/source", "--max-nodes", "0", expected=1)
+
+    def test_portable_ids_input_and_candidate_budgets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); left = root / "left"; right = root / "right"
+            shutil.copytree(ROOT / "fixtures/source", left); shutil.copytree(ROOT / "fixtures/source", right)
+            run_left, run_right = root / "run-left", root / "run-right"
+            self.run_cli("build", "--source", left, "--out", run_left, "--deterministic")
+            self.run_cli("build", "--source", right, "--out", run_right, "--deterministic")
+            self.assertEqual((run_left / "nodes.jsonl").read_bytes(), (run_right / "nodes.jsonl").read_bytes())
+            self.assertTrue(all(not Path(n["source_path"]).is_absolute() for n in map(json.loads, (run_left / "nodes.jsonl").read_text().splitlines())))
+            budgeted = root / "budgeted"; budgeted.mkdir(); (budgeted / "large.md").write_text("word " * 400, encoding="utf-8")
+            self.run_cli("build", "--source", budgeted, "--out", root / "input-limited", "--max-input-bytes", "1024", expected=1)
+            dense = root / "dense"; dense.mkdir()
+            for index in range(20): (dense / f"{index}.md").write_text("# Shared\n\ncommon terms across every page", encoding="utf-8")
+            limited = root / "pair-limited"
+            self.run_cli("build", "--source", dense, "--out", limited, "--max-candidate-pairs", "10", expected=1)
+            self.assertFalse(limited.exists())
 
     def test_scale_budget(self):
         with tempfile.TemporaryDirectory() as tmp:

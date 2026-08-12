@@ -1,0 +1,41 @@
+objective: "Review and harden ContentGraph for production use, improve performance/security/functionality, normalize the src layout, increase direct Kujo tooling, update documentation, and leave a verified next-session backlog."
+checklist_file: ""
+max_iterations: 8
+max_no_progress: 2
+max_consecutive_failures: 3
+
+allowed_actions:
+  - read_files
+  - edit_files
+  - run_tests
+  - commit_local_changes
+
+blocked_actions:
+  - deploy
+  - destructive_cleanup
+  - production_config_change
+
+eval_gates:
+  - id: validation
+    command: "bash scripts/validate.sh"
+    required: true
+
+  - id: benchmark
+    command: "./contentgraph-benchmark --nodes 1000"
+    required: true
+
+  - id: diff_check
+    command: "git diff --check"
+    required: true
+
+commit:
+  enabled: true
+  strategy: small_meaningful
+  push: true
+
+memory:
+  enabled: true
+  provider: strata
+  project: "Agent Notes"
+  mode: consolidate
+  retrieval_tests: true

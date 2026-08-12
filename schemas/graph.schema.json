@@ -1,7 +1,29 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.kujolang.ai/contentgraph/graph.v1.json",
+  "title": "ContentGraph graph v1",
   "type": "object",
+  "additionalProperties": false,
   "required": ["schema", "run_id", "generated_at", "nodes", "edges", "method"],
-  "properties": {"schema": {"const": "contentgraph.graph/v1"}, "method": {"const": "deterministic-lexical/v1"}, "generated_at": {"type": "string", "format": "date-time"}, "nodes": {"type": "array"}, "edges": {"type": "array"}}
+  "properties": {
+    "schema": {"const": "contentgraph.graph/v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "method": {"const": "deterministic-lexical/v1"},
+    "nodes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^CG-[a-f0-9]{20}$"}},
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target", "type", "weight"],
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "target": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "minLength": 1},
+          "weight": {"type": "number", "minimum": 0}
+        }
+      }
+    }
+  }
 }

@@ -1,0 +1,27 @@
+test_deterministic_rerun_cache_invalidation_and_budgets (__main__.ContentGraphTests) ... ok
+test_doctor_and_invalid_input (__main__.ContentGraphTests) ... ok
+test_malformed_inputs_path_fuzz_and_read_only_boundary (__main__.ContentGraphTests) ... ok
+test_portable_ids_input_and_candidate_budgets (__main__.ContentGraphTests) ... ok
+test_scale_budget (__main__.ContentGraphTests) ... ok
+test_siteprobe_ingestion_orphans_and_compare (__main__.ContentGraphTests) ... ok
+test_source_build_relationships_and_exports (__main__.ContentGraphTests) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 14.744s
+
+OK
+check passed: src/main.kujo
+check passed: scripts/benchmark.kujo
+test_deterministic_rerun_cache_invalidation_and_budgets (__main__.ContentGraphTests) ... ok
+test_doctor_and_invalid_input (__main__.ContentGraphTests) ... ok
+test_malformed_inputs_path_fuzz_and_read_only_boundary (__main__.ContentGraphTests) ... ok
+test_portable_ids_input_and_candidate_budgets (__main__.ContentGraphTests) ... ok
+test_scale_budget (__main__.ContentGraphTests) ... ok
+test_siteprobe_ingestion_orphans_and_compare (__main__.ContentGraphTests) ... ok
+test_source_build_relationships_and_exports (__main__.ContentGraphTests) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 14.762s
+
+OK
+ContentGraph validation passed.
