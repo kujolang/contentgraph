@@ -26,7 +26,8 @@ func consume_input(budget, path, per_file) {
         eprint("ContentGraph: input budget exceeded (" + to_string(budget["used"]) + " > " + to_string(budget["maximum"]) + " bytes)")
         exit(1)
     }
-    budget["files"] = push(budget["files"], {"path":path, "bytes":size, "sha256":sha256_file(path)})
+    portable_path := replace_str(path, "\\", "/")
+    budget["files"] = push(budget["files"], {"path":portable_path, "bytes":size, "sha256":sha256_file(path)})
     return budget
 }
 

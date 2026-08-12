@@ -42,8 +42,8 @@ run_cli(["build","--source","fixtures/source","--out",first,"--overlap-threshold
 run_cli(["build","--source","fixtures/source","--out",second,"--overlap-threshold","0.25","--deterministic","--json"],0)
 for name in ARTIFACTS {
     first_hash:=sha256_file(path_join(first,name));second_hash:=sha256_file(path_join(second,name));golden_hash:=sha256_file(path_join("fixtures/golden/run",name))
-    if first_hash!=second_hash { eprint("deterministic artifact mismatch: "+name+" first="+first_hash+" second="+second_hash+"\nFIRST:\n"+read_file(path_join(first,name))+"\nSECOND:\n"+read_file(path_join(second,name)));exit(1) }
-    if first_hash!=golden_hash { eprint("golden artifact mismatch: "+name+" actual="+first_hash+" expected="+golden_hash+"\nACTUAL:\n"+read_file(path_join(first,name))+"\nGOLDEN:\n"+read_file(path_join("fixtures/golden/run",name)));exit(1) }
+    if first_hash!=second_hash { eprint("deterministic artifact mismatch: "+name+" first="+first_hash+" second="+second_hash);exit(1) }
+    if first_hash!=golden_hash { eprint("golden artifact mismatch: "+name+" actual="+first_hash+" expected="+golden_hash);exit(1) }
 }
 
 # Artifact invariants and runtime contracts.
