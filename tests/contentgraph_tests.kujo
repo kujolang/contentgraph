@@ -13,7 +13,7 @@ func run_cli(arguments, expected) {
     launcher := ["./contentgraph"]
     if env("CONTENTGRAPH_WINDOWS_LAUNCHER")=="1" { launcher=["cmd.exe","/d","/c","contentgraph.cmd"] }
     result := spawn_process(concat(launcher,arguments),{"timeout_ms":180000,"max_output_bytes":1048576})
-    check_equal(result.exitcode,expected)
+    if result.exitcode!=expected { eprint("CLI exit mismatch: args="+to_json(arguments)+" actual="+to_string(result.exitcode)+" expected="+to_string(expected)+"\nstdout:\n"+result.stdout+"\nstderr:\n"+result.stderr);exit(1) }
     return result
 }
 
@@ -88,7 +88,8 @@ run_cli(["analysis",legacy],1)
 
 # Config precedence and unknown-key rejection.
 config:=path_join(root,"config.toml")
-write_file(config,"schema = \"contentgraph.config/v1\"\n[build]\nsource = [\"fixtures/source\"]\nout = \""+path_join(root,"config-run")+"\"\nmin_similarity = 0.0\ndeterministic = true\n")
+config_out:=replace_str(path_join(root,"config-run"),"\\","/")
+write_file(config,"schema = \"contentgraph.config/v1\"\n[build]\nsource = [\"fixtures/source\"]\nout = \""+config_out+"\"\nmin_similarity = 0.0\ndeterministic = true\n")
 run_cli(["build","--config",config,"--min-similarity","0.99","--json"],0)
 check_equal(parse_json(read_file(path_join(root,"config-run/metadata.json")))["thresholds"]["minimum"],0.99)
 bad_config:=path_join(root,"bad-config.toml")
