@@ -18,12 +18,12 @@ gate validation: pass
 
 ## gate: benchmark
 $ ./contentgraph-benchmark --nodes 1000
-{"candidate_pairs":0,"engine":"kujo","harness":"kujo","nodes":1000,"output_bytes":1384556,"peak_rss_bytes":121356288,"retained_similarity_pairs":0,"schema":"contentgraph.benchmark/v1","seconds":24.803937279,"skipped_high_frequency_terms":["corpus","highfrequency","page","shared","topic"]}
+{"candidate_pairs":0,"engine":"kujo","harness":"kujo","nodes":1000,"output_bytes":1384556,"peak_rss_bytes":122208256,"retained_similarity_pairs":0,"schema":"contentgraph.benchmark/v1","seconds":22.015927346,"skipped_high_frequency_terms":["corpus","highfrequency","page","shared","topic"]}
 gate benchmark: pass
 
 ## gate: release_bundle
 $ ../kujo/target/release/kujo run scripts/package-release.kujo
-{"archive":"dist/contentgraph-0.2.1.tar.gz","checksums":"dist/SHA256SUMS","provenance":"dist/contentgraph-0.2.1.provenance.json","sbom":"dist/contentgraph-0.2.1.cdx.json","schema":"contentgraph.release-bundle/v1","sha256":"fdca2f425d8689be78cc9ff3621b5e9670f1ed6fd9ada52627cd1f1858ac2ca9","version":"0.2.1"}
+{"archive":"dist/contentgraph-0.2.1.tar.gz","checksums":"dist/SHA256SUMS","provenance":"dist/contentgraph-0.2.1.provenance.json","sbom":"dist/contentgraph-0.2.1.cdx.json","schema":"contentgraph.release-bundle/v1","sha256":"f97f73871cbb5161982b1c03a09c850923e464d8770588e727b2fb3eee353f79","version":"0.2.1"}
 gate release_bundle: pass
 
 ## gate: diff_check
