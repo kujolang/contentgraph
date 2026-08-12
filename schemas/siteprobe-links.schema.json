@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/siteprobe-links.input.v1.json",
+  "type": "object",
+  "required": ["links"],
+  "properties": {"links": {"type": "array", "items": {"type": "object", "required": ["source", "target"]}}}
+}

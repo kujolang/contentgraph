@@ -1,0 +1,23 @@
+{
+  "opportunities": [
+    {
+      "id": "link-4082ddeae2c37ab7",
+      "method": "deterministic-lexical/v1",
+      "reason": "lexically related and not currently linked in this direction",
+      "requires_context_review": true,
+      "score": 0.473527,
+      "source": "CG-fa1f7f17e3be5faa0c27",
+      "target": "CG-f19843a31f62a06008ff"
+    },
+    {
+      "id": "link-7021eede2650f8a8",
+      "method": "deterministic-lexical/v1",
+      "reason": "lexically related and not currently linked in this direction",
+      "requires_context_review": true,
+      "score": 0.473527,
+      "source": "CG-f19843a31f62a06008ff",
+      "target": "CG-fa1f7f17e3be5faa0c27"
+    }
+  ],
+  "schema": "contentgraph.link-opportunities/v1"
+}

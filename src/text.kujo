@@ -1,0 +1,95 @@
+# Native deterministic text primitives for ContentGraph.
+
+STOP_WORDS := ["a","an","and","are","as","at","be","by","for","from","has","have","in","is","it","its","of","on","or","that","the","their","this","to","was","were","will","with","you","your","we","our","can","not","use","using","into","than","then","when","where","what","which","who","how"]
+
+func array_has(values, expected) {
+    for value in values { if value == expected { return true } }
+    return false
+}
+
+func stable_id(identity) {
+    normalized := lower(trim(identity))
+    return "CG-" + substring(sha256(normalized), 0, 20)
+}
+
+func normalize_space(text) {
+    return trim(regex_replace(text, "\\s+", " "))
+}
+
+func fingerprint(text) {
+    return sha256(lower(normalize_space(text)))
+}
+
+func html_unescape(text) {
+    value := replace_str(text, "&amp;", "&")
+    value = replace_str(value, "&lt;", "<")
+    value = replace_str(value, "&gt;", ">")
+    value = replace_str(value, "&quot;", "\"")
+    value = replace_str(value, "&#39;", "'")
+    value = replace_str(value, "&apos;", "'")
+    return value
+}
+
+func strip_markup(text) {
+    value := regex_replace(text, "(?is)<script[^>]*>.*?</script>|<style[^>]*>.*?</style>", " ")
+    value = regex_replace(value, "(?s)```.*?```", " ")
+    value = regex_replace(value, "<[^>]+>", " ")
+    value = regex_replace(value, "[#>*_`\\[\\](){}|]", " ")
+    return html_unescape(normalize_space(value))
+}
+
+func parse_frontmatter(text) {
+    if !starts_with(text, "---\n") { return {"meta":{}, "body":text} }
+    marker := index_of(substring(text, 4, len(text)), "\n---")
+    if marker < 0 { return {"meta":{}, "body":text} }
+    end := marker + 4
+    raw := substring(text, 4, end)
+    meta := {}
+    for line in split(raw, "\n") {
+        colon := index_of(line, ":")
+        if colon > 0 {
+            key := trim(substring(line, 0, colon))
+            value := trim(substring(line, colon + 1, len(line)))
+            if len(value) >= 2 {
+                first := char_at(value, 0)
+                last := char_at(value, len(value) - 1)
+                if (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+                    value = substring(value, 1, len(value) - 1)
+                }
+            }
+            meta[key] = value
+        }
+    }
+    return {"meta":meta, "body":substring(text, end + 4, len(text))}
+}
+
+func tokens(text) {
+    result := []
+    for token in regex_find_all(lower(text), "[a-z0-9][a-z0-9_-]{1,}") {
+        if !array_has(STOP_WORDS, token) && !regex_match(token, "^[0-9]+$") {
+            result = push(result, token)
+        }
+    }
+    return result
+}
+
+func title_from_text(path, meta, body) {
+    if has_key(meta, "title") && meta["title"] != "" { return meta["title"] }
+    headings := regex_find_all(body, "(?m)^#\\s+([^\\n]+)$")
+    if len(headings) > 0 { return trim(regex_replace(headings[0], "^#\\s+", "")) }
+    titles := regex_find_all(body, "(?is)<title[^>]*>.*?</title>")
+    if len(titles) > 0 { return strip_markup(titles[0]) }
+    name := basename(path)
+    dot := index_of(name, ".")
+    if dot > 0 { name = substring(name, 0, dot) }
+    return capitalize(replace_str(replace_str(name, "-", " "), "_", " "))
+}
+
+export array_has := array_has
+export stable_id := stable_id
+export normalize_space := normalize_space
+export fingerprint := fingerprint
+export strip_markup := strip_markup
+export parse_frontmatter := parse_frontmatter
+export tokens := tokens
+export title_from_text := title_from_text

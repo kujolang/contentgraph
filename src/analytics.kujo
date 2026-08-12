@@ -1,0 +1,148 @@
+# Deterministic bounded graph-analysis reports.
+
+func dict_increment(mapping, key, amount) {
+    if has_key(mapping, key) == 0 { mapping[key] = 0 }
+    mapping[key] = mapping[key] + amount
+    return mapping
+}
+
+func find_root(parent, node_id) {
+    current := node_id
+    loop {
+        if parent[current] == current { return current }
+        parent[current] = parent[parent[current]]
+        current = parent[current]
+    }
+}
+
+func union_nodes(parent, left, right) {
+    a := find_root(parent, left)
+    b := find_root(parent, right)
+    if a == b { return parent }
+    if a < b { parent[b] = a } else { parent[a] = b }
+    return parent
+}
+
+func insert_ranked(items, item, score_field, limit) {
+    result := []
+    inserted := false
+    for current in items {
+        if !inserted && (item[score_field] > current[score_field] || (item[score_field] == current[score_field] && item["node_id"] < current["node_id"])) {
+            result = push(result, item)
+            inserted = true
+        }
+        result = push(result, current)
+    }
+    if !inserted { result = push(result, item) }
+    if len(result) > limit { result = slice(result, 0, limit) }
+    return result
+}
+
+func analyze_graph(nodes, edges, clusters) {
+    ids := []
+    node_map := {}
+    parent := {}
+    incoming := {}
+    outgoing := {}
+    neighbors := {}
+    internal_out := {}
+    for node in nodes {
+        id := node["id"]
+        ids = push(ids, id); node_map[id] = node; parent[id] = id
+        incoming[id] = 0; outgoing[id] = 0; neighbors[id] = []; internal_out[id] = []
+    }
+    ids = sort(ids)
+    for edge in edges {
+        source := edge["source"]; target := edge["target"]
+        if has_key(node_map, source) && has_key(node_map, target) {
+            parent=union_nodes(parent, source, target)
+            neighbors[source] = push(neighbors[source], target)
+            neighbors[target] = push(neighbors[target], source)
+            if edge["type"] == "internal-link" {
+                outgoing=dict_increment(outgoing, source, 1); incoming=dict_increment(incoming, target, 1)
+                internal_out[source] = push(internal_out[source], target)
+            }
+        }
+    }
+    component_members := {}
+    for id in ids {
+        root := find_root(parent, id)
+        if has_key(component_members, root) == 0 { component_members[root] = [] }
+        component_members[root] = push(component_members[root], id)
+    }
+    component_roots:=sort(keys(component_members)); components := range(0,len(component_roots)); component_array_index:=0
+    component_index := 1
+    for root in component_roots {
+        members := sort(component_members[root])
+        centrality := []
+        denom := max(1, len(members) - 1)
+        for id in members {
+            centrality = insert_ranked(centrality, {"node_id":id,"degree":len(unique(neighbors[id])),"degree_centrality":round(len(unique(neighbors[id]))/denom*1000000)/1000000}, "degree", 25)
+        }
+        components[component_array_index] = {"id":"component-"+to_string(component_index),"size":len(members),"node_ids":members,"centrality":centrality}; component_array_index=component_array_index+1
+        component_index = component_index + 1
+    }
+
+    bridges := []
+    hubs := []
+    authorities := []
+    for id in ids {
+        cluster_set := {}
+        for other in neighbors[id] { cluster_set[node_map[other]["cluster"]] = true }
+        if len(keys(cluster_set)) > 1 {
+            bridges = insert_ranked(bridges, {"node_id":id,"clusters_connected":len(keys(cluster_set)),"degree":incoming[id]+outgoing[id]}, "clusters_connected", 100)
+        }
+        hubs = insert_ranked(hubs, {"node_id":id,"score":outgoing[id]}, "score", 100)
+        authorities = insert_ranked(authorities, {"node_id":id,"score":incoming[id]}, "score", 100)
+    }
+
+    # Infer crawl depth from internal-link roots and compare it with supplied crawl depth.
+    inferred := {}
+    queue := []
+    for id in ids {
+        if incoming[id] == 0 { inferred[id] = 0; queue = push(queue, id) }
+    }
+    if len(queue) == 0 && len(ids) > 0 { inferred[ids[0]] = 0; queue = push(queue, ids[0]) }
+    cursor := 0
+    loop {
+        if cursor >= len(queue) { break }
+        id := queue[cursor]; cursor = cursor + 1
+        for target in internal_out[id] {
+            depth := inferred[id] + 1
+            if has_key(inferred, target) == 0 || depth < inferred[target] { inferred[target] = depth; queue = push(queue, target) }
+        }
+    }
+    drift := []
+    for id in ids {
+        supplied := node_map[id]["crawl_depth"]
+        if supplied != null && has_key(inferred, id) && supplied != inferred[id] {
+            drift = push(drift, {"node_id":id,"supplied_depth":supplied,"inferred_depth":inferred[id],"delta":supplied-inferred[id]})
+        }
+    }
+
+    health := range(0,len(clusters)); health_index:=0
+    health_counts := {}
+    for cluster in clusters {
+        orphan_count := 0
+        for id in cluster["node_ids"] { if incoming[id] == 0 { orphan_count = orphan_count + 1 } }
+        health_counts[cluster["id"]]={"internal":0,"cross":0,"orphans":orphan_count,"size":cluster["size"]}
+    }
+    for edge in edges {
+        if edge["type"] == "search-query-association" || has_key(node_map,edge["source"])==0 || has_key(node_map,edge["target"])==0 { continue }
+        source_cluster:=node_map[edge["source"]]["cluster"]
+        target_cluster:=node_map[edge["target"]]["cluster"]
+        if source_cluster==target_cluster {
+            stats:=health_counts[source_cluster]; stats["internal"]=stats["internal"]+1; health_counts[source_cluster]=stats
+        } else {
+            source_stats:=health_counts[source_cluster]; source_stats["cross"]=source_stats["cross"]+1; health_counts[source_cluster]=source_stats
+            target_stats:=health_counts[target_cluster]; target_stats["cross"]=target_stats["cross"]+1; health_counts[target_cluster]=target_stats
+        }
+    }
+    for cluster in clusters {
+        stats:=health_counts[cluster["id"]]
+        health[health_index] = {"cluster_id":cluster["id"],"size":stats["size"],"internal_edges":stats["internal"],"cross_cluster_edges":stats["cross"],"orphan_nodes":stats["orphans"],"density":round(stats["internal"]/max(1,stats["size"]*(stats["size"]-1))*1000000)/1000000}; health_index=health_index+1
+    }
+    return {"schema":"contentgraph.analysis/v1","components":components,"bridge_pages":bridges,"authorities":authorities,"hubs":hubs,"crawl_depth_drift":drift,"cluster_health":health,"method":"deterministic-graph-analysis/v1"}
+}
+
+export analyze_graph := analyze_graph

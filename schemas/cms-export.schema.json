@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/cms-export.v1.json",
+  "title": "ContentGraph CMS export v1",
+  "type": "object",
+  "required": ["schema", "entries"],
+  "properties": {
+    "schema": {"const": "contentgraph.cms-export/v1"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "content"],
+        "properties": {
+          "id": {"type": ["string", "integer"]},
+          "title": {"type": "string"},
+          "content": {"type": "string"},
+          "url": {"type": "string"},
+          "canonical": {"type": "string"}
+        }
+      }
+    }
+  }
+}

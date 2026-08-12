@@ -1,0 +1,15 @@
+from src.text import stable_id, fingerprint, strip_markup, parse_frontmatter, tokens
+
+raw := "---\ntitle: \"Kujo: Guide\"\nurl: https://example.com/guide\n---\n# Kujo Guide\n\n<script>bad()</script> Build robust agent workflows &amp; tools.\n"
+parsed := parse_frontmatter(raw)
+clean := strip_markup(parsed["body"])
+actual := {
+    "clean":clean,
+    "fingerprint":fingerprint(clean),
+    "identity":stable_id(parsed["meta"]["url"]),
+    "meta":parsed["meta"],
+    "tokens":tokens("Kujo Guide Kujo Guide " + clean)
+}
+expected := parse_json(read_file("fixtures/golden/primitives.json"))
+assert_equal(to_json(actual), to_json(expected))
+print("Native primitive compatibility passed.")

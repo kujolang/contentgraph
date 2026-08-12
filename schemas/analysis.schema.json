@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/analysis.v1.json",
+  "title": "ContentGraph analysis v1",
+  "type": "object",
+  "required": ["schema", "components", "bridge_pages", "authorities", "hubs", "crawl_depth_drift", "cluster_health"],
+  "properties": {
+    "schema": {"const": "contentgraph.analysis/v1"},
+    "components": {"type": "array"},
+    "bridge_pages": {"type": "array"},
+    "authorities": {"type": "array"},
+    "hubs": {"type": "array"},
+    "crawl_depth_drift": {"type": "array"},
+    "cluster_health": {"type": "array"}
+  }
+}

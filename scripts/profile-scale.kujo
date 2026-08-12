@@ -1,0 +1,9 @@
+# Reproducible native Kujo scale profile at the documented enterprise envelopes.
+sizes := [5000,10000,20000]
+results := []
+for size in sizes {
+    run := spawn_process(["./contentgraph-benchmark","--nodes",to_string(size)],{"timeout_ms":900000,"max_output_bytes":65536})
+    if run.exitcode!=0 { eprint(run.stderr); exit(run.exitcode) }
+    results=push(results,parse_json(trim(run.stdout)))
+}
+print(to_json({"schema":"contentgraph.scale-profile/v1","engine":"kujo","high_frequency_term_filter_ratio":0.05,"profiles":results}))

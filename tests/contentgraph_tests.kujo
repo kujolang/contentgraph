@@ -1,4 +1,165 @@
-result := spawn_process(["python3", "tests/test_contentgraph.py"], {"timeout_ms": 180000})
-if result.stdout != "" { print(trim_end(result.stdout)) }
-if result.stderr != "" { print(trim_end(result.stderr)) }
-exit(result.exitcode)
+# Native end-to-end, property, differential, and adversarial ContentGraph suite.
+
+ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","manifest.json"]
+
+func check_equal(actual,expected) {
+    if actual!=expected { eprint("check_equal failed: actual="+to_string(actual)+" expected="+to_string(expected)); exit(1) }
+}
+
+func check_true(value) { if !value { eprint("check_true failed"); exit(1) } }
+func check_false(value) { if value { eprint("check_false failed"); exit(1) } }
+
+func run_cli(arguments, expected) {
+    result := spawn_process(concat(["./contentgraph"],arguments),{"timeout_ms":180000,"max_output_bytes":1048576})
+    check_equal(result.exitcode,expected)
+    return result
+}
+
+func read_jsonl(path) {
+    values:=[]
+    for line in read_lines(path) { if trim(line)!="" { values=push(values,parse_json(line)) } }
+    return values
+}
+
+func cleanup_run(path) {
+    for name in ARTIFACTS { if path_exists(path_join(path,name)) { delete_file(path_join(path,name)) } }
+    if path_exists(path) { os_rmdir(path) }
+}
+
+func cleanup_files(path,names) {
+    for name in names { if path_exists(path_join(path,name)) { delete_file(path_join(path,name)) } }
+    if path_exists(path) { os_rmdir(path) }
+}
+
+root := "/tmp/contentgraph-tests-"+uuid_v4()
+create_dir(root)
+
+# Golden byte compatibility and deterministic reruns.
+first:=path_join(root,"first"); second:=path_join(root,"second")
+run_cli(["build","--source","fixtures/source","--out",first,"--overlap-threshold","0.25","--deterministic","--json"],0)
+run_cli(["build","--source","fixtures/source","--out",second,"--overlap-threshold","0.25","--deterministic","--json"],0)
+for name in ARTIFACTS {
+    check_equal(sha256_file(path_join(first,name)),sha256_file(path_join(second,name)))
+    check_equal(sha256_file(path_join(first,name)),sha256_file(path_join("fixtures/golden/run",name)))
+}
+
+# Artifact invariants and runtime contracts.
+graph:=parse_json(read_file(path_join(first,"graph.json")))
+nodes:=read_jsonl(path_join(first,"nodes.jsonl")); edges:=read_jsonl(path_join(first,"edges.jsonl"))
+check_equal(len(graph["nodes"]),len(unique(graph["nodes"])))
+check_equal(len(nodes),3)
+node_map:={}; cluster_membership:={}
+for node in nodes {
+    check_true(regex_match(node["id"],"^CG-[a-f0-9]{20}$"))
+    check_true(regex_match(node["content_fingerprint"],"^[a-f0-9]{64}$"))
+    check_false(starts_with(node["source_path"],"/"))
+    node_map[node["id"]]=node
+    if has_key(cluster_membership,node["id"])==0 { cluster_membership[node["id"]]=0 }
+    cluster_membership[node["id"]]=cluster_membership[node["id"]]+1
+}
+for edge in edges {
+    check_true(has_key(node_map,edge["source"])==1 || starts_with(edge["source"],"query:"))
+    check_true(has_key(node_map,edge["target"])==1)
+    check_true(edge["weight"]>=0)
+}
+for node in nodes {
+    for related in node["related_pages"] {
+        reciprocal:=false
+        for candidate in node_map[related["node_id"]]["related_pages"] { if candidate["node_id"]==node["id"] { reciprocal=true } }
+        check_true(reciprocal)
+    }
+}
+clusters:=parse_json(read_file(path_join(first,"clusters.json")))["clusters"]
+seen:={}
+for cluster in clusters { for id in cluster["node_ids"] { if has_key(seen,id)==0{seen[id]=0};seen[id]=seen[id]+1 } }
+for id in graph["nodes"] { check_equal(seen[id],1) }
+analysis:=parse_json(read_file(path_join(first,"analysis.json")))
+check_true(has_key(analysis,"components")==1); check_true(has_key(analysis,"cluster_health")==1); check_true(has_key(analysis,"bridge_pages")==1)
+
+# Backward compatibility: 0.1 graph runs did not contain analysis.json.
+legacy:=path_join(root,"legacy");create_dir(legacy)
+for name in ARTIFACTS { if name!="analysis.json" && name!="manifest.json" && name!="vector-cache.jsonl" { copy_file(path_join(first,name),path_join(legacy,name)) } }
+run_cli(["orphans",legacy],0)
+run_cli(["analysis",legacy],1)
+
+# Config precedence and unknown-key rejection.
+config:=path_join(root,"config.toml")
+write_file(config,"schema = \"contentgraph.config/v1\"\n[build]\nsource = [\"fixtures/source\"]\nout = \""+path_join(root,"config-run")+"\"\nmin_similarity = 0.0\ndeterministic = true\n")
+run_cli(["build","--config",config,"--min-similarity","0.99","--json"],0)
+check_equal(parse_json(read_file(path_join(root,"config-run/metadata.json")))["thresholds"]["minimum"],0.99)
+bad_config:=path_join(root,"bad-config.toml")
+write_file(bad_config,"schema = \"contentgraph.config/v1\"\n[build]\nunknown = true\n")
+run_cli(["build","--config",bad_config],1)
+
+# Adapters and GraphML query-node integrity.
+adapter_run:=path_join(root,"adapters")
+run_cli(["build","--sitemap","fixtures/adapters/sitemap.xml","--csv","fixtures/adapters/content.csv","--cms","fixtures/adapters/cms.json","--searchbridge","fixtures/adapters/searchbridge.json","--out",adapter_run,"--deterministic","--json"],0)
+graphml_result:=run_cli(["export",adapter_run,"--format","graphml"],0)
+graphml:=graphml_result.stdout
+check_true(contains(graphml,"search-query")>0); check_true(contains(graphml,"query:")>0); check_true(contains(graphml,"deterministic content graph")>0)
+
+# Incremental equivalence, cache invalidation, and comparison differentials.
+incremental:=path_join(root,"incremental")
+cache_result:=run_cli(["build","--source","fixtures/source","--out",incremental,"--incremental-from",first,"--overlap-threshold","0.25","--deterministic","--json"],0)
+check_equal(parse_json(cache_result.stdout)["cache"],"hit")
+for name in ARTIFACTS { check_equal(sha256_file(path_join(first,name)),sha256_file(path_join(incremental,name))) }
+changed_source:=path_join(root,"changed-source"); create_dir(changed_source)
+write_file(path_join(changed_source,"guide-a.md"),read_file("fixtures/source/guide-a.md")+"\nmaterial change\n")
+write_file(path_join(changed_source,"guide-b.md"),read_file("fixtures/source/guide-b.md"))
+write_file(path_join(changed_source,"unrelated.md"),read_file("fixtures/source/unrelated.md"))
+changed:=path_join(root,"changed")
+miss:=run_cli(["build","--source",changed_source,"--out",changed,"--incremental-from",first,"--overlap-threshold","0.25","--deterministic","--json"],0)
+check_equal(parse_json(miss.stdout)["cache"],"miss")
+check_equal(parse_json(read_file(path_join(changed,"metadata.json")))["usage"]["reused_tokenizations"],2)
+comparison_result:=run_cli(["compare",first,changed],0)
+comparison:=parse_json(comparison_result.stdout)
+change_types:=[]; for item in comparison["changes"] { change_types=push(change_types,item["type"]) }
+check_true(contains(to_json(change_types),"CONTENT_CHANGED")>0)
+
+# Duplicate canonicals, Unicode determinism, and high-cardinality metadata.
+properties:=path_join(root,"properties"); create_dir(properties)
+write_file(path_join(properties,"one.md"),"---\nurl: https://example.com/duplicate\n"+join(map(range(0,200),func(i){return "meta"+to_string(i)+": value"}),"\n")+"\n---\n# Café\n\nComposed café content.")
+write_file(path_join(properties,"two.md"),"---\ncanonical: https://example.com/duplicate\n---\n# Café\n\nDecomposed café content.")
+property_run:=path_join(root,"property-run")
+run_cli(["build","--source",properties,"--out",property_run,"--deterministic","--json"],0)
+check_equal(parse_json(read_file(path_join(property_run,"metadata.json")))["counts"]["nodes"],1)
+check_true(contains(read_file(path_join(property_run,"nodes.jsonl")),"Café")>0)
+
+# Fail-closed resource and schema behavior.
+limited:=path_join(root,"limited")
+run_cli(["build","--source","fixtures/source","--out",limited,"--max-output-bytes","1024"],1)
+check_false(path_exists(limited))
+run_cli(["build","--source",properties,"--out",path_join(root,"pair-limited"),"--max-candidate-pairs","1"],0)
+dense:=path_join(root,"dense");create_dir(dense)
+for i in range(0,20){write_file(path_join(dense,"page-"+to_string(i)+".md"),"---\nurl: https://example.com/dense-"+to_string(i)+"\n---\n# Shared\n\ncommon terms across every page")}
+pair_failure:=path_join(root,"pair-failure")
+run_cli(["build","--source",dense,"--out",pair_failure,"--max-candidate-pairs","10"],1)
+check_false(path_exists(pair_failure))
+corrupt:=path_join(root,"corrupt")
+run_cli(["build","--source","fixtures/source","--out",corrupt,"--deterministic"],0)
+write_file(path_join(corrupt,"graph.json"),"{}\n",true)
+run_cli(["orphans",corrupt],1)
+run_cli(["build","--source","/definitely/not/here"],1)
+run_cli(["related",first,"--node","guide-a.md","--limit","0"],1)
+
+# Input immutability.
+source_hashes:={}
+for name in ["guide-a.md","guide-b.md","unrelated.md"] { source_hashes[name]=sha256_file(path_join("fixtures/source",name)) }
+immutability:=path_join(root,"immutability")
+run_cli(["build","--source","fixtures/source","--out",immutability,"--deterministic"],0)
+for name in keys(source_hashes) { check_equal(source_hashes[name],sha256_file(path_join("fixtures/source",name))) }
+
+# Native primitive oracle.
+kujo_bin:=env("CONTENTGRAPH_KUJO_BIN"); if kujo_bin==""{kujo_bin="../kujo/target/release/kujo"}
+primitive:=spawn_process([kujo_bin,"run","tests/native_primitives_tests.kujo"],{"timeout_ms":30000,"max_output_bytes":65536})
+check_equal(primitive.exitcode,0)
+
+# Clean UUID-scoped temporary artifacts.
+for path in [first,second,path_join(root,"config-run"),adapter_run,incremental,changed,property_run,path_join(root,"pair-limited"),corrupt,immutability] { cleanup_run(path) }
+legacy_artifacts:=[];for name in ARTIFACTS{if name!="analysis.json"&&name!="manifest.json"&&name!="vector-cache.jsonl"{legacy_artifacts=push(legacy_artifacts,name)}};cleanup_files(legacy,legacy_artifacts)
+cleanup_files(changed_source,["guide-a.md","guide-b.md","unrelated.md"])
+cleanup_files(properties,["one.md","two.md"])
+dense_names:=[];for i in range(0,20){dense_names=push(dense_names,"page-"+to_string(i)+".md")};cleanup_files(dense,dense_names)
+delete_file(config); delete_file(bad_config)
+os_rmdir(root)
+print("ContentGraph native validation passed.")

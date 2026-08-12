@@ -1,17 +1,241 @@
-# ContentGraph's Kujo entrypoint. The compatibility engine supplies deterministic
-# local text parsing and sparse lexical math while those pieces are ported to Kujo.
-func main() {
-	command := ["python3", "src/contentgraph.py"]
-	argv := args()
-	i := 0
-	loop {
-		if i >= len(argv) { break }
-		command = push(command, to_string(argv[i]))
-		i := i + 1
-	}
-	result := spawn_process(command, {"timeout_ms": 600000})
-	if result.stdout != "" { print(trim_end(result.stdout)) }
-	if result.stderr != "" { print(trim_end(result.stderr)) }
-	exit(result.exitcode)
+from src.engine import METHOD, ARTIFACT_NAMES, build_graph, fail
+from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, doctor_schema, config_schema
+
+VERSION := "0.2.0"
+LEGACY_ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","metadata.json","report.md"]
+
+func value_or(mapping, key, fallback) { if has_key(mapping,key) { return mapping[key] }; return fallback }
+
+func default_options() {
+    return {
+        "siteprobe":[],"source":[],"searchbridge":[],"sitemap":[],"csv":[],"cms":[],
+        "out":"","incremental_from":"","min_similarity":0.12,"cluster_threshold":0.20,
+        "overlap_threshold":0.55,"max_nodes":5000,"max_input_bytes":536870912,
+        "max_output_bytes":268435456,"max_report_tokens":2000,"max_candidate_pairs":2000000,
+        "max_related_per_node":20,"max_term_document_frequency_ratio":1.0,
+        "deterministic":false,"json":false
+    }
 }
-main()
+
+func config_path(argv) {
+    i := 0
+    loop {
+        if i >= len(argv) { break }
+        if argv[i] == "--config" {
+            if i+1 >= len(argv) { fail("--config requires a path") }
+            return argv[i+1]
+        }
+        i=i+1
+    }
+    return ""
+}
+
+func load_config(path) {
+    if path == "" { return {} }
+    if !path_is_file(path) { fail("config file not found: "+path) }
+    text := read_file(path)
+    data := null
+    if lower(path_extension(path)) == "json" { data=parse_json(text) }
+    else if lower(path_extension(path)) == "toml" { data=parse_toml(text) }
+    else { fail("config must use .toml or .json") }
+    validate_contract(data,config_schema(),"configuration")
+    return value_or(data,"build",{})
+}
+
+func merge_config(options, config) {
+    for pair in items(config) { options[pair[0]]=pair[1] }
+    return options
+}
+
+func require_value(argv, index, option) { if index+1>=len(argv) { fail(option+" requires a value") }; return argv[index+1] }
+
+func parse_build_options(argv) {
+    options := merge_config(default_options(),load_config(config_path(argv)))
+    i:=1
+    loop {
+        if i>=len(argv) { break }
+        arg:=argv[i]
+        if arg=="--config" { i=i+2; continue }
+        if arg=="--siteprobe" { options["siteprobe"]=push(options["siteprobe"],require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--source" { options["source"]=push(options["source"],require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--searchbridge" { options["searchbridge"]=push(options["searchbridge"],require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--sitemap" { options["sitemap"]=push(options["sitemap"],require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--csv" { options["csv"]=push(options["csv"],require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--cms" { options["cms"]=push(options["cms"],require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--out" { options["out"]=require_value(argv,i,arg); i=i+2; continue }
+        if arg=="--incremental-from" { options["incremental_from"]=require_value(argv,i,arg); i=i+2; continue }
+        if arg=="--min-similarity" { options["min_similarity"]=to_float(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--cluster-threshold" { options["cluster_threshold"]=to_float(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--overlap-threshold" { options["overlap_threshold"]=to_float(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-nodes" { options["max_nodes"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-input-bytes" { options["max_input_bytes"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-output-bytes" { options["max_output_bytes"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-report-tokens" { options["max_report_tokens"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-candidate-pairs" { options["max_candidate_pairs"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-related-per-node" { options["max_related_per_node"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-term-document-frequency-ratio" { options["max_term_document_frequency_ratio"]=to_float(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--deterministic" { options["deterministic"]=true; i=i+1; continue }
+        if arg=="--json" { options["json"]=true; i=i+1; continue }
+        fail("unknown build option: "+arg)
+    }
+    if options["out"]=="" {
+        if options["deterministic"] { options["out"]=".contentgraph/deterministic" }
+        else { options["out"]=".contentgraph/"+replace_str(replace_str(now_utc(),":",""),"-","") }
+    }
+    thresholds:=[options["min_similarity"],options["cluster_threshold"],options["overlap_threshold"]]
+    for threshold in thresholds { if threshold<0 || threshold>1 { fail("similarity thresholds must be between 0 and 1") } }
+    if options["max_nodes"]<1 || options["max_nodes"]>20000 { fail("max_nodes must be between 1 and 20000") }
+    if options["max_input_bytes"]<1024 || options["max_output_bytes"]<1024 || options["max_report_tokens"]<64 || options["max_candidate_pairs"]<1 { fail("resource budgets are outside safe limits") }
+    if options["max_related_per_node"]<1 || options["max_related_per_node"]>1000 { fail("max_related_per_node must be between 1 and 1000") }
+    if options["max_term_document_frequency_ratio"]<0 || options["max_term_document_frequency_ratio"]>1 { fail("max_term_document_frequency_ratio must be between 0 and 1") }
+    return options
+}
+
+func jsonl(path) {
+    values:=[]
+    for line in read_lines(path) { if trim(line)!="" { values=push(values,parse_json(line)) } }
+    return values
+}
+
+func validate_run(run) {
+    for name in LEGACY_ARTIFACTS { if !path_is_file(path_join(run,name)) { fail("invalid ContentGraph run, missing: "+name) } }
+    manifest_path:=path_join(run,"manifest.json")
+    if path_is_file(manifest_path) {
+        manifest:=validate_contract(parse_json(read_file(manifest_path)),manifest_schema(),"stored manifest")
+        for name in keys(manifest["artifacts"]) {
+            path:=path_join(run,name)
+            if !path_is_file(path) || sha256_file(path)!=manifest["artifacts"][name] { fail("artifact integrity check failed: "+name) }
+        }
+    }
+    graph:=validate_contract(parse_json(read_file(path_join(run,"graph.json"))),graph_schema(),"stored graph")
+    nodes:=jsonl(path_join(run,"nodes.jsonl")); offset:=0
+    loop { if offset>=len(nodes){break}; validate_contract(slice(nodes,offset,min(offset+500,len(nodes))),{"type":"array","items":node_schema()},"stored nodes"); offset=offset+500 }
+    edges:=jsonl(path_join(run,"edges.jsonl")); offset=0
+    loop { if offset>=len(edges){break}; validate_contract(slice(edges,offset,min(offset+1000,len(edges))),{"type":"array","items":edge_schema()},"stored edges"); offset=offset+1000 }
+    if file_size(path_join(run,"clusters.json"))<=1048576 { validate_contract(parse_json(read_file(path_join(run,"clusters.json"))),wrapper_schema("contentgraph.clusters/v1","clusters"),"stored clusters") }
+    if file_size(path_join(run,"overlaps.json"))<=1048576 { validate_contract(parse_json(read_file(path_join(run,"overlaps.json"))),wrapper_schema("contentgraph.overlaps/v1","overlaps"),"stored overlaps") }
+    if file_size(path_join(run,"orphan-candidates.json"))<=1048576 { validate_contract(parse_json(read_file(path_join(run,"orphan-candidates.json"))),wrapper_schema("contentgraph.orphans/v1","candidates"),"stored orphans") }
+    if file_size(path_join(run,"link-opportunities.json"))<=1048576 { validate_contract(parse_json(read_file(path_join(run,"link-opportunities.json"))),wrapper_schema("contentgraph.link-opportunities/v1","opportunities"),"stored opportunities") }
+    if path_is_file(path_join(run,"analysis.json")) && file_size(path_join(run,"analysis.json"))<=1048576 { validate_contract(parse_json(read_file(path_join(run,"analysis.json"))),analysis_schema(),"stored analysis") }
+    validate_contract(parse_json(read_file(path_join(run,"metadata.json"))),metadata_schema(),"stored metadata")
+    return {"graph":graph,"nodes":nodes,"edges":edges}
+}
+
+func node_map(nodes) {
+    result:={}
+    for node in nodes {
+        result[node["id"]]=node
+        if node["url"]!="" { result[node["url"]]=node }
+        if node["source_relative"]!="" { result[node["source_relative"]]=node }
+    }
+    return result
+}
+
+func compare_runs(old_path,new_path) {
+    old:=validate_run(old_path); new:=validate_run(new_path)
+    before:={}; after:={}
+    for node in old["nodes"] { before[node["id"]]=node }
+    for node in new["nodes"] { after[node["id"]]=node }
+    changes:=[]
+    all_ids:={}; for id in keys(before) { all_ids[id]=true }; for id in keys(after) { all_ids[id]=true }
+    for id in sort(keys(all_ids)) {
+        if has_key(before,id) == 0 { changes=push(changes,{"type":"NODE_ADDED","node_id":id}); continue }
+        if has_key(after,id) == 0 { changes=push(changes,{"type":"NODE_REMOVED","node_id":id}); continue }
+        if before[id]["content_fingerprint"]!=after[id]["content_fingerprint"] { changes=push(changes,{"type":"CONTENT_CHANGED","node_id":id}) }
+        if before[id]["cluster"]!=after[id]["cluster"] { changes=push(changes,{"type":"CLUSTER_CHANGED","node_id":id,"before":before[id]["cluster"],"after":after[id]["cluster"]}) }
+        if before[id]["incoming_links"]!=after[id]["incoming_links"] { changes=push(changes,{"type":"INCOMING_LINKS_CHANGED","node_id":id,"before":before[id]["incoming_links"],"after":after[id]["incoming_links"]}) }
+    }
+    before_edges:={}; after_edges:={}
+    for edge in old["edges"] { before_edges[edge["source"]+"|"+edge["target"]+"|"+edge["type"]]=edge }
+    for edge in new["edges"] { after_edges[edge["source"]+"|"+edge["target"]+"|"+edge["type"]]=edge }
+    edge_keys:={}; for key in keys(before_edges){edge_keys[key]=true}; for key in keys(after_edges){edge_keys[key]=true}
+    for key in sort(keys(edge_keys)) {
+        if has_key(before_edges,key) == 0 { edge:=after_edges[key]; changes=push(changes,{"type":"EDGE_ADDED","source":edge["source"],"target":edge["target"],"edge_type":edge["type"]}); continue }
+        if has_key(after_edges,key) == 0 { edge:=before_edges[key]; changes=push(changes,{"type":"EDGE_REMOVED","source":edge["source"],"target":edge["target"],"edge_type":edge["type"]}); continue }
+        if before_edges[key]["weight"]!=after_edges[key]["weight"] { edge:=after_edges[key]; changes=push(changes,{"type":"EDGE_WEIGHT_CHANGED","source":edge["source"],"target":edge["target"],"edge_type":edge["type"],"before":before_edges[key]["weight"],"after":edge["weight"]}) }
+    }
+    return {"schema":"contentgraph.comparison/v1","old_run":old_path,"new_run":new_path,"changes":changes}
+}
+
+func graphml(run_data) {
+    lines:=["<?xml version=\"1.0\" encoding=\"UTF-8\"?>","<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\">","<key id=\"title\" for=\"node\" attr.name=\"title\" attr.type=\"string\"/>","<key id=\"kind\" for=\"node\" attr.name=\"kind\" attr.type=\"string\"/>","<key id=\"type\" for=\"edge\" attr.name=\"type\" attr.type=\"string\"/>","<graph edgedefault=\"directed\">"]
+    for node in run_data["nodes"] { lines=push(lines,"<node id=\""+escape_xml(node["id"])+"\"><data key=\"title\">"+escape_xml(node["title"])+"</data><data key=\"kind\">content</data></node>") }
+    queries:={}
+    for edge in run_data["edges"] {
+        if starts_with(edge["source"],"query:") { queries[edge["source"]]=value_or(edge["evidence"],"query",edge["source"]) }
+    }
+    for id in sort(keys(queries)) { lines=push(lines,"<node id=\""+escape_xml(id)+"\"><data key=\"title\">"+escape_xml(queries[id])+"</data><data key=\"kind\">search-query</data></node>") }
+    edge_index:=0
+    for edge in run_data["edges"] { lines=push(lines,"<edge id=\"e"+to_string(edge_index)+"\" source=\""+escape_xml(edge["source"])+"\" target=\""+escape_xml(edge["target"])+"\"><data key=\"type\">"+escape_xml(edge["type"])+"</data></edge>"); edge_index=edge_index+1 }
+    lines=push(lines,"</graph></graphml>")
+    return join(lines,"\n")+"\n"
+}
+
+func write_export(path,text,force) {
+    if path_exists(path) && !force { fail("export destination exists (use --force): "+path) }
+    create_dir(dirname(path)); write_file(path,text,force)
+}
+
+func doctor_report() {
+    kujo_bin:=env("CONTENTGRAPH_KUJO_BIN")
+    if kujo_bin=="" { kujo_bin="kujo" }
+    kujo:=spawn_process([kujo_bin,"--version"],{"timeout_ms":5000,"max_output_bytes":4096})
+    python:=spawn_process(["python3","--version"],{"timeout_ms":5000,"max_output_bytes":4096})
+    probe:=path_join("/tmp","contentgraph-doctor-"+uuid_v4())
+    fs_ok:=false
+    write_file(probe,"ok")
+    if read_file(probe)=="ok" { fs_ok=true; delete_file(probe) }
+    kujo_ok:=kujo.exitcode==0
+    python_ok:=python.exitcode==0
+    overall_ok:=kujo_ok && fs_ok
+    return {"schema":"contentgraph.doctor/v1","ok":overall_ok,"engine":{"language":"kujo","native":true,"contract":"contentgraph.native-engine/v1"},"runtime":{"kujo":{"ok":kujo_ok,"version":trim(kujo.stdout),"binary":kujo_bin},"python":{"required":false,"available":python_ok,"version":trim(python.stdout+python.stderr)}},"filesystem":{"temporary_read_write_delete":fs_ok},"network_required":false,"paid_api_required":false,"method":METHOD,"contracts":{"graph":"contentgraph.graph/v1","config":"contentgraph.config/v1"},"safe_limits":{"max_nodes_hard":20000,"max_nodes_default":5000,"max_input_bytes_default":536870912,"max_output_bytes_default":268435456,"max_candidate_pairs_default":2000000,"guidance":"Lower max_term_document_frequency_ratio for dense high-frequency corpora."}}
+}
+
+func usage() {
+    print("ContentGraph "+VERSION)
+    print("Usage: contentgraph <doctor|version|build|inspect|related|orphans|clusters|overlaps|link-opportunities|analysis|compare|export> [options]")
+}
+
+func main() {
+    argv:=args()
+    if len(argv)==0 { usage(); exit(1) }
+    command:=argv[0]
+    if command=="version" { print(to_json({"name":"contentgraph","version":VERSION,"contract":"contentgraph.graph/v1","method":METHOD,"engine":"kujo"})); return }
+    if command=="doctor" {
+        if len(argv)>1 && !(len(argv)==2 && argv[1]=="--json") { fail("unknown doctor option: "+argv[1]) }
+        report:=validate_contract(doctor_report(),doctor_schema(),"doctor report"); print(to_json(report)); if !report["ok"] { exit(1) }; return
+    }
+    if command=="build" { build_graph(parse_build_options(argv)); return }
+    if command=="compare" { if len(argv)!=3 { fail("compare requires OLD_RUN NEW_RUN") }; print(to_json_pretty(compare_runs(argv[1],argv[2]))); return }
+    if len(argv)<2 { fail(command+" requires a run directory") }
+    run_path:=argv[1]; data:=validate_run(run_path)
+    if command=="inspect" {
+        target:=""; i:=2; loop { if i>=len(argv){break}; if argv[i]=="--node" { target=require_value(argv,i,"--node"); i=i+2 } else { fail("unknown inspect option: "+argv[i]) } }
+        if target=="" { fail("inspect requires --node") }
+        mapping:=node_map(data["nodes"]); if has_key(mapping,target)==0{fail("node not found: "+target)}; node:=mapping[target]
+        relations:=[]; for edge in data["edges"] { if edge["source"]==node["id"]||edge["target"]==node["id"] {relations=push(relations,edge)} }
+        print(to_json_pretty({"node":node,"relationships":relations})); return
+    }
+    if command=="related" {
+        target:=""; limit:=10; i:=2; loop { if i>=len(argv){break}; if argv[i]=="--node"{target=require_value(argv,i,"--node");i=i+2}else if argv[i]=="--limit"{limit=to_int(require_value(argv,i,"--limit"));i=i+2}else{fail("unknown related option: "+argv[i])} }
+        if limit<1||limit>1000{fail("--limit must be between 1 and 1000")}; mapping:=node_map(data["nodes"]); if has_key(mapping,target)==0{fail("node not found: "+target)}; node:=mapping[target]
+        print(to_json_pretty({"node_id":node["id"],"related":slice(node["related_pages"],0,min(limit,len(node["related_pages"]))) })); return
+    }
+    if command=="orphans" { print(read_file(path_join(run_path,"orphan-candidates.json"))); return }
+    if command=="clusters" { print(read_file(path_join(run_path,"clusters.json"))); return }
+    if command=="overlaps" { print(read_file(path_join(run_path,"overlaps.json"))); return }
+    if command=="link-opportunities" { print(read_file(path_join(run_path,"link-opportunities.json"))); return }
+    if command=="analysis" { if !path_is_file(path_join(run_path,"analysis.json")){fail("analysis artifact is unavailable for this legacy run")}; print(read_file(path_join(run_path,"analysis.json"))); return }
+    if command=="export" {
+        format_name:="json"; out:=""; force:=false; i:=2
+        loop { if i>=len(argv){break}; if argv[i]=="--format"{format_name=require_value(argv,i,"--format");i=i+2}else if argv[i]=="--out"{out=require_value(argv,i,"--out");i=i+2}else if argv[i]=="--force"{force=true;i=i+1}else{fail("unknown export option: "+argv[i])} }
+        text:=read_file(path_join(run_path,"graph.json")); if format_name=="graphml"{text=graphml(data)}else if format_name!="json"{fail("export format must be json or graphml")}
+        if out!=""{write_export(out,text,force)}else{print(text)}; return
+    }
+    fail("unknown command: "+command)
+}
+
+try { main() } except error {
+    eprint("ContentGraph: "+substring(to_string(error),0,min(300,len(to_string(error)))))
+    exit(1)
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/doctor.v1.json",
+  "title": "ContentGraph doctor v1",
+  "type": "object",
+  "required": ["schema", "ok", "engine", "runtime", "filesystem", "network_required", "paid_api_required", "method", "contracts", "safe_limits"],
+  "properties": {
+    "schema": {"const": "contentgraph.doctor/v1"},
+    "ok": {"type": "boolean"},
+    "engine": {"type": "object"},
+    "runtime": {"type": "object"},
+    "filesystem": {"type": "object"},
+    "network_required": {"const": false},
+    "paid_api_required": {"const": false},
+    "method": {"const": "deterministic-lexical/v1"},
+    "contracts": {"type": "object"},
+    "safe_limits": {"type": "object"}
+  }
+}

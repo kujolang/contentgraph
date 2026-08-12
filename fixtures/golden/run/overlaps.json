@@ -1,0 +1,14 @@
+{
+  "overlaps": [
+    {
+      "classification": "cannibalization-candidate",
+      "id": "overlap-7021eede2650f8a8",
+      "left": "CG-f19843a31f62a06008ff",
+      "method": "deterministic-lexical/v1",
+      "requires_intent_review": true,
+      "right": "CG-fa1f7f17e3be5faa0c27",
+      "score": 0.473527
+    }
+  ],
+  "schema": "contentgraph.overlaps/v1"
+}

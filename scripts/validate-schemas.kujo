@@ -1,0 +1,10 @@
+count:=0
+for name in sort(list_dir("schemas")) {
+    if path_extension(name)=="json" {
+        schema:=parse_json(read_file(path_join("schemas",name)))
+        if type(schema)!="dict" || has_key(schema,"$schema")==0 || has_key(schema,"$id")==0 { eprint("Invalid schema metadata: "+name); exit(1) }
+        count=count+1
+    }
+}
+if count==0 { eprint("No JSON schemas found"); exit(1) }
+print("Validated "+to_string(count)+" JSON Schemas with Kujo.")

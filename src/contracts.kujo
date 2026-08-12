@@ -1,0 +1,190 @@
+# Runtime contracts. Schemas are deliberately kept within Kujo's local JSON Schema subset.
+
+func validate_contract(value, schema, label) {
+    report := json_schema_validate(value, schema)
+    if !report["valid"] {
+        eprint("ContentGraph: invalid " + label + ": " + to_json(report["errors"]))
+        exit(1)
+    }
+    return value
+}
+
+func node_schema() {
+    return {
+        "type":"object",
+        "required":["schema","id","title","content_fingerprint","topic_signals","incoming_links","outgoing_links","related_pages"],
+        "properties":{
+            "schema":{"const":"contentgraph.node/v1"},
+            "id":{"type":"string","pattern":"^CG-[a-f0-9]{20}$"},
+            "title":{"type":"string"},
+            "content_fingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "topic_signals":{"type":"array","items":{"type":"string"}},
+            "incoming_links":{"type":"integer","minimum":0},
+            "outgoing_links":{"type":"integer","minimum":0},
+            "related_pages":{"type":"array"}
+        }
+    }
+}
+
+func edge_schema() {
+    return {
+        "type":"object",
+        "required":["schema","source","target","type","method","weight","evidence"],
+        "properties":{
+            "schema":{"const":"contentgraph.edge/v1"},
+            "source":{"type":"string","minLength":1},
+            "target":{"type":"string","minLength":1},
+            "type":{"enum":["internal-link","lexical-similarity","search-query-association","parent-child"]},
+            "method":{"enum":["deterministic-lexical/v1","existing-internal-link","measured-provider-evidence"]},
+            "weight":{"type":"number","minimum":0},
+            "evidence":{"type":"object"}
+        }
+    }
+}
+
+func graph_schema() {
+    return {
+        "type":"object",
+        "required":["schema","run_id","generated_at","nodes","edges","method"],
+        "properties":{
+            "schema":{"const":"contentgraph.graph/v1"},
+            "run_id":{"type":"string","minLength":1},
+            "generated_at":{"type":"string","minLength":1},
+            "method":{"const":"deterministic-lexical/v1"},
+            "nodes":{"type":"array","items":{"type":"string","pattern":"^CG-[a-f0-9]{20}$"}},
+            "edges":{"type":"array","items":{"type":"object","required":["source","target","type","weight"]}}
+        }
+    }
+}
+
+func wrapper_schema(schema_name, field) {
+    properties := {"schema":{"const":schema_name}}
+    properties[field] = {"type":"array"}
+    return {"type":"object","required":["schema",field],"properties":properties}
+}
+
+func metadata_schema() {
+    return {
+        "type":"object",
+        "required":["schema","run_id","inputs","adapters","thresholds","budgets","usage","counts","cache","engine"],
+        "properties":{
+            "schema":{"const":"contentgraph.metadata/v1"},
+            "run_id":{"type":"string","minLength":1},
+            "inputs":{"type":"object"},"adapters":{"type":"object"},"thresholds":{"type":"object"},
+            "budgets":{"type":"object"},"usage":{"type":"object"},"counts":{"type":"object"},
+            "cache":{"type":"object"},"engine":{"type":"object"}
+        }
+    }
+}
+
+func analysis_schema() {
+    return {"type":"object","required":["schema","components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health"],"properties":{"schema":{"const":"contentgraph.analysis/v1"}}}
+}
+
+func manifest_schema() {
+    return {
+        "type":"object",
+        "required":["schema","artifacts"],
+        "additionalProperties":false,
+        "properties":{
+            "schema":{"const":"contentgraph.manifest/v1"},
+            "artifacts":{"type":"object","additionalProperties":{"type":"string","pattern":"^[a-f0-9]{64}$"}}
+        }
+    }
+}
+
+func vector_cache_entry_schema() {
+    return {
+        "type":"object",
+        "required":["schema","node_id","content_fingerprint","terms"],
+        "additionalProperties":false,
+        "properties":{
+            "schema":{"const":"contentgraph.vector-cache-entry/v1"},
+            "node_id":{"type":"string","pattern":"^CG-[a-f0-9]{20}$"},
+            "content_fingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "terms":{"type":"array","items":{"type":"string"}}
+        }
+    }
+}
+
+func doctor_schema() {
+    return {
+        "type":"object",
+        "required":["schema","ok","engine","runtime","filesystem","network_required","paid_api_required","method","contracts","safe_limits"],
+        "properties":{
+            "schema":{"const":"contentgraph.doctor/v1"},"ok":{"type":"boolean"},
+            "engine":{"type":"object"},"runtime":{"type":"object"},"filesystem":{"type":"object"},
+            "network_required":{"const":false},"paid_api_required":{"const":false},
+            "method":{"const":"deterministic-lexical/v1"},"contracts":{"type":"object"},"safe_limits":{"type":"object"}
+        }
+    }
+}
+
+func siteprobe_page_schema() {
+    return {"type":"object","required":["url"],"properties":{"url":{"type":"string","minLength":1},"headings":{"type":"object"},"internal_links":{"type":"array"}}}
+}
+
+func siteprobe_links_schema() {
+    return {"type":"object","required":["links"],"properties":{"links":{"type":"array","items":{"type":"object","required":["source","target"]}}}}
+}
+
+func searchbridge_schema() {
+    return {"type":"object","required":["schema","capability","rows"],"properties":{"schema":{"const":"searchbridge.result/v1"},"capability":{"type":"string"},"rows":{"type":"array"}}}
+}
+
+func cms_schema() {
+    return {"type":"object","required":["schema","entries"],"properties":{"schema":{"const":"contentgraph.cms-export/v1"},"entries":{"type":"array","items":{"type":"object","required":["id","title","content"]}}}}
+}
+
+func config_schema() {
+    return {
+        "type":"object",
+        "required":["schema"],
+        "additionalProperties":false,
+        "properties":{
+            "schema":{"const":"contentgraph.config/v1"},
+            "build":{
+                "type":"object",
+                "additionalProperties":false,
+                "properties":{
+                    "siteprobe":{"type":"array","items":{"type":"string"}},
+                    "source":{"type":"array","items":{"type":"string"}},
+                    "searchbridge":{"type":"array","items":{"type":"string"}},
+                    "sitemap":{"type":"array","items":{"type":"string"}},
+                    "csv":{"type":"array","items":{"type":"string"}},
+                    "cms":{"type":"array","items":{"type":"string"}},
+                    "out":{"type":"string"},
+                    "incremental_from":{"type":"string"},
+                    "min_similarity":{"type":"number","minimum":0,"maximum":1},
+                    "cluster_threshold":{"type":"number","minimum":0,"maximum":1},
+                    "overlap_threshold":{"type":"number","minimum":0,"maximum":1},
+                    "max_nodes":{"type":"integer","minimum":1,"maximum":20000},
+                    "max_input_bytes":{"type":"integer","minimum":1024},
+                    "max_output_bytes":{"type":"integer","minimum":1024},
+                    "max_report_tokens":{"type":"integer","minimum":64},
+                    "max_candidate_pairs":{"type":"integer","minimum":1},
+                    "max_related_per_node":{"type":"integer","minimum":1,"maximum":1000},
+                    "max_term_document_frequency_ratio":{"type":"number","minimum":0,"maximum":1},
+                    "deterministic":{"type":"boolean"},
+                    "json":{"type":"boolean"}
+                }
+            }
+        }
+    }
+}
+
+export validate_contract := validate_contract
+export node_schema := node_schema
+export edge_schema := edge_schema
+export graph_schema := graph_schema
+export wrapper_schema := wrapper_schema
+export metadata_schema := metadata_schema
+export analysis_schema := analysis_schema
+export manifest_schema := manifest_schema
+export vector_cache_entry_schema := vector_cache_entry_schema
+export doctor_schema := doctor_schema
+export siteprobe_page_schema := siteprobe_page_schema
+export siteprobe_links_schema := siteprobe_links_schema
+export searchbridge_schema := searchbridge_schema
+export cms_schema := cms_schema
+export config_schema := config_schema

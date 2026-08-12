@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/config.v1.json",
+  "title": "ContentGraph configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema"],
+  "properties": {
+    "schema": {"const": "contentgraph.config/v1"},
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "siteprobe": {"type": "array", "items": {"type": "string"}},
+        "source": {"type": "array", "items": {"type": "string"}},
+        "searchbridge": {"type": "array", "items": {"type": "string"}},
+        "sitemap": {"type": "array", "items": {"type": "string"}},
+        "csv": {"type": "array", "items": {"type": "string"}},
+        "cms": {"type": "array", "items": {"type": "string"}},
+        "out": {"type": "string"},
+        "incremental_from": {"type": "string"},
+        "min_similarity": {"type": "number", "minimum": 0, "maximum": 1},
+        "cluster_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        "overlap_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_nodes": {"type": "integer", "minimum": 1, "maximum": 20000},
+        "max_input_bytes": {"type": "integer", "minimum": 1024},
+        "max_output_bytes": {"type": "integer", "minimum": 1024},
+        "max_report_tokens": {"type": "integer", "minimum": 64},
+        "max_candidate_pairs": {"type": "integer", "minimum": 1},
+        "max_related_per_node": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "max_term_document_frequency_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "deterministic": {"type": "boolean"},
+        "json": {"type": "boolean"}
+      }
+    }
+  }
+}

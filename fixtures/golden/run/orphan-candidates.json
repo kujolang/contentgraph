@@ -1,0 +1,26 @@
+{
+  "candidates": [
+    {
+      "classification": "orphan",
+      "incoming_links": 0,
+      "node_id": "CG-30423b60ab8726e67a00",
+      "title": "Static Site Typography",
+      "url": "https://example.com/typography"
+    },
+    {
+      "classification": "orphan",
+      "incoming_links": 0,
+      "node_id": "CG-f19843a31f62a06008ff",
+      "title": "Agent Workflow Evidence",
+      "url": "https://example.com/guide-b"
+    },
+    {
+      "classification": "orphan",
+      "incoming_links": 0,
+      "node_id": "CG-fa1f7f17e3be5faa0c27",
+      "title": "Kujo Agent Workflows",
+      "url": "https://example.com/guide-a"
+    }
+  ],
+  "schema": "contentgraph.orphans/v1"
+}

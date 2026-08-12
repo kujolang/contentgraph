@@ -3,5 +3,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KUJO_RUNTIME="${KUJO_BIN:-$ROOT/../kujo/target/release/kujo}"
 if [[ ! -x "$KUJO_RUNTIME" ]]; then printf 'ContentGraph: Kujo runtime not found. Set KUJO_BIN.\n' >&2; exit 2; fi
+export CONTENTGRAPH_KUJO_BIN="$KUJO_RUNTIME"
 cd "$ROOT"
-exec "$KUJO_RUNTIME" run src/main.kujo -- "$@"
+exec "$KUJO_RUNTIME" run --untrusted \
+  --allow-fs-read --allow-fs-write --allow-fs-delete \
+  --allow-process-exec --allow-env-read --allow-clock --allow-random \
+  src/main.kujo -- "$@"

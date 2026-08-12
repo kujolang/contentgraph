@@ -1,0 +1,19 @@
+{
+  "edges": [
+    {
+      "source": "CG-f19843a31f62a06008ff",
+      "target": "CG-fa1f7f17e3be5faa0c27",
+      "type": "lexical-similarity",
+      "weight": 0.473527
+    }
+  ],
+  "generated_at": "1970-01-01T00:00:00Z",
+  "method": "deterministic-lexical/v1",
+  "nodes": [
+    "CG-30423b60ab8726e67a00",
+    "CG-f19843a31f62a06008ff",
+    "CG-fa1f7f17e3be5faa0c27"
+  ],
+  "run_id": "deterministic",
+  "schema": "contentgraph.graph/v1"
+}

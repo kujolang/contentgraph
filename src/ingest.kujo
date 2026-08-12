@@ -1,0 +1,258 @@
+from src.text import stable_id, fingerprint, strip_markup, parse_frontmatter, title_from_text
+from src.contracts import validate_contract, siteprobe_page_schema, siteprobe_links_schema, searchbridge_schema, cms_schema
+
+MAX_FILE_BYTES := 5242880
+EXCLUDED_DIRS := [".git", ".contentgraph", ".siteprobe", ".webops", "node_modules", "vendor", "kennel_packages", "output", "dist", "build", "__pycache__"]
+SOURCE_EXTENSIONS := ["md", "markdown", "html", "htm", "txt", "json"]
+
+func list_has(values, target) {
+    for value in values { if value == target { return true } }
+    return false
+}
+
+func value_or(mapping, key, fallback) {
+    if has_key(mapping, key) { return mapping[key] }
+    return fallback
+}
+
+func consume_input(budget, path, per_file) {
+    size := file_size(path)
+    if per_file && size > MAX_FILE_BYTES {
+        eprint("ContentGraph: input file exceeds 5242880 byte limit: " + basename(path))
+        exit(1)
+    }
+    budget["used"] = budget["used"] + size
+    if budget["used"] > budget["maximum"] {
+        eprint("ContentGraph: input budget exceeded (" + to_string(budget["used"]) + " > " + to_string(budget["maximum"]) + " bytes)")
+        exit(1)
+    }
+    budget["files"] = push(budget["files"], {"path":path, "bytes":size, "sha256":sha256_file(path)})
+    return budget
+}
+
+func source_files(root, relative) {
+    results := []
+    if path_is_file(root) {
+        return [{"path":root, "relative":basename(root)}]
+    }
+    names := sort(list_dir(root))
+    for name in names {
+        if list_has(EXCLUDED_DIRS, name) { continue }
+        path := path_join(root, name)
+        rel := name
+        if relative != "" { rel = relative + "/" + name }
+        if path_is_symlink(path) { continue }
+        if path_is_dir(path) {
+            results = concat(results, source_files(path, rel))
+        } else if path_is_file(path) && list_has(SOURCE_EXTENSIONS, lower(path_extension(path))) {
+            results = push(results, {"path":path, "relative":rel})
+        }
+    }
+    return results
+}
+
+func make_node(identity, title, text, fields) {
+    node := {
+        "schema":"contentgraph.node/v1",
+        "id":stable_id(identity),
+        "url":"",
+        "canonical_url":"",
+        "source_path":"",
+        "source_relative":"",
+        "title":title,
+        "content_type":"",
+        "text":text,
+        "content_fingerprint":fingerprint(text),
+        "cluster":"",
+        "parent_id":"",
+        "child_ids":[],
+        "incoming_links":0,
+        "outgoing_links":0,
+        "related_pages":[],
+        "search_queries":[],
+        "portfolio_state":"",
+        "last_material_update":"",
+        "crawl_depth":null,
+        "sitemap_member":null,
+        "existing_targets":[]
+    }
+    for pair in items(fields) { node[pair[0]] = pair[1] }
+    return node
+}
+
+func ingest_source(root, budget, max_nodes) {
+    if trim(root) == "" || !path_exists(root) {
+        eprint("ContentGraph: source path not found: " + root)
+        exit(1)
+    }
+    nodes := []
+    for item in source_files(root, "") {
+        budget = consume_input(budget, item["path"], true)
+        raw := read_file_lossy(item["path"])
+        parsed := parse_frontmatter(raw)
+        meta := parsed["meta"]
+        body := parsed["body"]
+        text := strip_markup(body)
+        url := value_or(meta, "url", "")
+        canonical := value_or(meta, "canonical", url)
+        identity := canonical
+        if identity == "" { identity = "source:" + item["relative"] }
+        fields := {
+            "url":url,
+            "canonical_url":canonical,
+            "source_path":item["relative"],
+            "source_relative":item["relative"],
+            "content_type":value_or(meta, "type", path_extension(item["path"])),
+            "portfolio_state":value_or(meta, "portfolio_state", ""),
+            "last_material_update":value_or(meta, "last_updated", value_or(meta, "date", ""))
+        }
+        nodes = push(nodes, make_node(identity, title_from_text(item["path"], meta, body), text, fields))
+        if len(nodes) > max_nodes { eprint("ContentGraph: node cap exceeded while reading source: " + root); exit(1) }
+    }
+    return {"nodes":nodes, "edges":[], "budget":budget}
+}
+
+func ingest_siteprobe(run, budget, max_nodes) {
+    pages_path := path_join(run, "pages.jsonl")
+    links_path := path_join(run, "links.json")
+    if !path_is_file(pages_path) || !path_is_file(links_path) {
+        eprint("ContentGraph: invalid SiteProbe run: " + run)
+        exit(1)
+    }
+    budget = consume_input(budget, pages_path, false)
+    budget = consume_input(budget, links_path, false)
+    nodes := []
+    for line in read_lines(pages_path) {
+        if trim(line) == "" { continue }
+        page := validate_contract(parse_json(line), siteprobe_page_schema(), "SiteProbe page")
+        url := value_or(page, "canonical", value_or(page, "final_url", page["url"]))
+        title := value_or(page, "title", "")
+        heading_values := []
+        headings := value_or(page, "headings", {})
+        for key in sort(keys(headings)) {
+            for heading in headings[key] { heading_values = push(heading_values, heading) }
+        }
+        metadata_text := join([title, value_or(page, "meta_description", ""), join(heading_values, " ")], " ")
+        targets := []
+        for link in value_or(page, "internal_links", []) {
+            if has_key(link, "url") { targets = push(targets, link["url"]) }
+        }
+        fields := {
+            "url":value_or(page, "final_url", url),
+            "canonical_url":url,
+            "content_type":value_or(page, "content_type", ""),
+            "content_fingerprint":value_or(page, "content_fingerprint", fingerprint(metadata_text)),
+            "incoming_links":value_or(page, "incoming_link_count", 0),
+            "outgoing_links":value_or(page, "outgoing_link_count", 0),
+            "crawl_depth":value_or(page, "depth", null),
+            "sitemap_member":value_or(page, "sitemap_member", null),
+            "existing_targets":targets
+        }
+        nodes = push(nodes, make_node(url, title, metadata_text, fields))
+        if len(nodes) > max_nodes { eprint("ContentGraph: node cap exceeded while reading SiteProbe run: " + run); exit(1) }
+    }
+    links_doc := validate_contract(parse_json(read_file(links_path)), siteprobe_links_schema(), "SiteProbe links")
+    url_map := {}
+    for node in nodes { url_map[node["url"]] = node["id"]; url_map[node["canonical_url"]] = node["id"] }
+    edges := []
+    for link in links_doc["links"] {
+        if value_or(link, "internal", false) && has_key(url_map, link["source"]) && has_key(url_map, link["target"]) {
+            edges = push(edges, {"schema":"contentgraph.edge/v1","source":url_map[link["source"]],"target":url_map[link["target"]],"type":"internal-link","method":"existing-internal-link","weight":1.0,"evidence":{"anchor":value_or(link,"text",""),"source_url":link["source"],"target_url":link["target"]}})
+        }
+    }
+    return {"nodes":nodes, "edges":edges, "budget":budget}
+}
+
+func ingest_sitemap(path, budget, max_nodes) {
+    if !path_is_file(path) { eprint("ContentGraph: sitemap not found: " + path); exit(1) }
+    budget = consume_input(budget, path, false)
+    xml := read_file_lossy(path)
+    urls := regex_find_all(xml, "(?is)<loc>.*?</loc>")
+    nodes := []
+    for raw in urls {
+        url := strip_markup(raw)
+        if url == "" { continue }
+        title := replace_str(basename(url), "-", " ")
+        if title == "" { title = url }
+        nodes = push(nodes, make_node(url, capitalize(title), title, {"url":url,"canonical_url":url,"content_type":"application/xml","sitemap_member":true}))
+        if len(nodes) > max_nodes { eprint("ContentGraph: node cap exceeded while reading sitemap: " + path); exit(1) }
+    }
+    if len(nodes) == 0 { eprint("ContentGraph: sitemap contains no <loc> entries: " + path); exit(1) }
+    return {"nodes":nodes, "edges":[], "budget":budget}
+}
+
+func ingest_csv(path, budget, max_nodes) {
+    if !path_is_file(path) { eprint("ContentGraph: CSV export not found: " + path); exit(1) }
+    budget = consume_input(budget, path, false)
+    rows := parse_csv(read_file_lossy(path))
+    nodes := range(0,len(rows)); row_index:=0
+    for row in rows {
+        if has_key(row, "title") == 0 || (has_key(row, "content") == 0 && has_key(row, "url") == 0) {
+            eprint("ContentGraph: CSV requires title and content or url columns")
+            exit(1)
+        }
+        url := value_or(row, "url", "")
+        canonical := value_or(row, "canonical", url)
+        identity := value_or(row, "id", canonical)
+        if identity == "" { identity = "csv:" + row["title"] }
+        identity = to_string(identity)
+        content := to_string(value_or(row, "content", ""))
+        nodes[row_index] = make_node(identity, to_string(row["title"]), strip_markup(content), {"url":url,"canonical_url":canonical,"source_path":basename(path),"content_type":"text/csv","last_material_update":to_string(value_or(row,"last_updated",""))})
+        row_index=row_index+1
+    }
+    if len(nodes) > max_nodes { eprint("ContentGraph: node cap exceeded while reading CSV: " + path); exit(1) }
+    return {"nodes":nodes, "edges":[], "budget":budget}
+}
+
+func ingest_cms(path, budget, max_nodes) {
+    if !path_is_file(path) { eprint("ContentGraph: CMS export not found: " + path); exit(1) }
+    budget = consume_input(budget, path, false)
+    doc := validate_contract(parse_json(read_file(path)), cms_schema(), "CMS export")
+    nodes := []
+    for entry in doc["entries"] {
+        url := value_or(entry, "url", "")
+        canonical := value_or(entry, "canonical", url)
+        identity := canonical
+        if identity == "" { identity = "cms:" + to_string(entry["id"]) }
+        fields := {"url":url,"canonical_url":canonical,"source_path":basename(path),"content_type":value_or(entry,"content_type","text/html"),"portfolio_state":value_or(entry,"status",""),"last_material_update":value_or(entry,"updated_at","")}
+        nodes = push(nodes, make_node(identity, entry["title"], strip_markup(entry["content"]), fields))
+        if len(nodes) > max_nodes { eprint("ContentGraph: node cap exceeded while reading CMS export: " + path); exit(1) }
+    }
+    return {"nodes":nodes, "edges":[], "budget":budget}
+}
+
+func add_search_associations(paths, nodes, budget) {
+    edges := []
+    url_map := {}
+    node_index := 0
+    for node in nodes {
+        if node["url"] != "" { url_map[node["url"]] = node_index }
+        if node["canonical_url"] != "" { url_map[node["canonical_url"]] = node_index }
+        node_index = node_index + 1
+    }
+    for path in paths {
+        if !path_is_file(path) { eprint("ContentGraph: SearchBridge result not found: " + path); exit(1) }
+        budget = consume_input(budget, path, false)
+        doc := validate_contract(parse_json(read_file(path)), searchbridge_schema(), "SearchBridge result")
+        if doc["capability"] != "search.performance" { continue }
+        for row in doc["rows"] {
+            if has_key(row, "page") && has_key(row, "query") && has_key(url_map, row["page"]) {
+                index := url_map[row["page"]]
+                node := nodes[index]
+                evidence := {"query":row["query"],"provider":value_or(doc,"provider","")}
+                node["search_queries"] = push(node["search_queries"], {"query":row["query"],"clicks":value_or(row,"clicks",null),"impressions":value_or(row,"impressions",null),"position":value_or(row,"position",null),"provider":value_or(doc,"provider",""),"retrieved_at":value_or(doc,"retrieved_at","")})
+                nodes[index] = node
+                edges = push(edges, {"schema":"contentgraph.edge/v1","source":"query:"+substring(sha256(row["query"]),0,16),"target":node["id"],"type":"search-query-association","method":"measured-provider-evidence","weight":to_float(value_or(row,"impressions",0)),"evidence":evidence})
+            }
+        }
+    }
+    return {"edges":edges, "nodes":nodes, "budget":budget}
+}
+
+export value_or := value_or
+export ingest_source := ingest_source
+export ingest_siteprobe := ingest_siteprobe
+export ingest_sitemap := ingest_sitemap
+export ingest_csv := ingest_csv
+export ingest_cms := ingest_cms
+export add_search_associations := add_search_associations

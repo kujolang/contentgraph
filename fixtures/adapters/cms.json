@@ -1,0 +1,14 @@
+{
+  "schema": "contentgraph.cms-export/v1",
+  "entries": [
+    {
+      "id": "cms-one",
+      "title": "CMS Content Graph",
+      "url": "https://example.com/cms-graph",
+      "content": "<h1>CMS Content Graph</h1><p>Deterministic graph workflows.</p>",
+      "content_type": "text/html",
+      "status": "published",
+      "updated_at": "2026-08-12T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kujolang.ai/contentgraph/vector-cache-entry.v1.json",
+  "type": "object",
+  "required": ["schema", "node_id", "content_fingerprint", "terms"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "contentgraph.vector-cache-entry/v1"},
+    "node_id": {"type": "string", "pattern": "^CG-[a-f0-9]{20}$"},
+    "content_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "terms": {"type": "array", "items": {"type": "string"}}
+  }
+}

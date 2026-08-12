@@ -19,38 +19,51 @@ loop {
 if node_count < 1 || node_count > 20000 { fail("--nodes must be between 1 and 20000") }
 
 root := "/tmp/contentgraph-benchmark-" + uuid_v4()
-source := root + "/source"
+source := root + "/source.csv"
 out := root + "/run"
 create_dir(root)
-create_dir(source)
+write_file(source,"id,title,url,content\n")
 
 i = 0
 loop {
     if i >= node_count { break }
-    name := source + "/page-" + to_string(i) + ".md"
-    body := "# Page " + to_string(i) + "\n\nshared topic " + to_string(i % 50) + " unique-" + to_string(i) + "\n"
-    write_file(name, body)
+    body := to_string(i) + ",Page " + to_string(i) + ",https://example.com/page-" + to_string(i) + ",shared highfrequency topic corpus\n"
+    append_file(source, body)
     i = i + 1
 }
 
 started := performance_now()
-result := spawn_process(["python3", "src/contentgraph.py", "build", "--source", source, "--out", out, "--max-nodes", to_string(node_count), "--deterministic", "--json"], {"timeout_ms": 600000})
+build_command := ["./contentgraph", "build", "--csv", source, "--out", out, "--max-nodes", to_string(node_count), "--max-term-document-frequency-ratio", "0.05", "--deterministic", "--json"]
+platform := trim(spawn_process(["uname","-s"],{"timeout_ms":5000,"max_output_bytes":4096}).stdout)
+timing_path := root + "/resource-usage.txt"
+timed_command := build_command
+if path_is_file("/usr/bin/time") {
+    if platform=="Darwin" { timed_command=concat(["/usr/bin/time","-l","-o",timing_path],build_command) }
+    else if platform=="Linux" { timed_command=concat(["/usr/bin/time","-v","-o",timing_path],build_command) }
+}
+result := spawn_process(timed_command, {"timeout_ms": 900000, "max_output_bytes":65536})
 elapsed := (performance_now() - started) / 1000.0
 if result.exitcode != 0 { fail(trim(result.stderr + "\n" + result.stdout)) }
 
-artifact_names := ["graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "metadata.json", "report.md"]
+peak_rss_bytes := null
+if path_is_file(timing_path) {
+    for line in read_lines(timing_path) {
+        if contains(lower(line),"maximum resident set size")>0 {
+            digits:=regex_replace(line,"[^0-9]","")
+            if digits!="" { peak_rss_bytes=to_int(digits); if platform=="Linux" { peak_rss_bytes=peak_rss_bytes*1024 } }
+        }
+    }
+}
+
+artifact_names := ["graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "analysis.json", "metadata.json", "report.md", "vector-cache.jsonl", "manifest.json"]
 output_bytes := 0
 for name in artifact_names { output_bytes = output_bytes + file_size(out + "/" + name) }
-print(to_json({"schema":"contentgraph.benchmark/v1", "nodes":node_count, "seconds":elapsed, "output_bytes":output_bytes, "harness":"kujo"}))
+build_result := parse_json(result.stdout)
+print(to_json({"schema":"contentgraph.benchmark/v1", "nodes":node_count, "seconds":elapsed, "peak_rss_bytes":peak_rss_bytes, "output_bytes":output_bytes, "candidate_pairs":build_result["usage"]["candidate_pairs"], "retained_similarity_pairs":build_result["usage"]["retained_similarity_pairs"], "harness":"kujo", "engine":"kujo"}))
 
 # Remove only the UUID-scoped temporary tree created above.
 for name in artifact_names { delete_file(out + "/" + name) }
 os_rmdir(out)
-i = 0
-loop {
-    if i >= node_count { break }
-    delete_file(source + "/page-" + to_string(i) + ".md")
-    i = i + 1
-}
-os_rmdir(source)
+delete_file(source)
+if path_is_file(timing_path) { delete_file(timing_path) }
 os_rmdir(root)

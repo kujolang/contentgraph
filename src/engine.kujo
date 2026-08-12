@@ -1,0 +1,506 @@
+from src.text import stable_id, tokens, array_has
+from src.ingest import value_or, ingest_source, ingest_siteprobe, ingest_sitemap, ingest_csv, ingest_cms, add_search_associations
+from src.analytics import analyze_graph
+from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, vector_cache_entry_schema
+
+METHOD := "deterministic-lexical/v1"
+ARTIFACT_NAMES := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","manifest.json"]
+
+func fail(message) { eprint("ContentGraph: " + message); exit(1) }
+
+func dict_increment(mapping, key, amount) {
+    if has_key(mapping, key) == 0 { mapping[key] = 0 }
+    mapping[key] = mapping[key] + amount
+    return mapping
+}
+
+func merge_nodes(groups, max_nodes) {
+    merged := {}
+    for group in groups {
+        for node in group {
+            identity := node["canonical_url"]
+            if identity == "" { identity = node["url"] }
+            if identity == "" { identity = node["source_path"] }
+            if identity == "" { identity = node["id"] }
+            key := stable_id(lower(identity))
+            if has_key(merged, key) == 0 {
+                node["id"] = key
+                merged[key] = node
+            } else {
+                current := merged[key]
+                fields := ["url","canonical_url","source_path","source_relative","title","content_type","text","last_material_update","portfolio_state"]
+                for field in fields {
+                    if current[field] == "" && node[field] != "" { current[field] = node[field] }
+                }
+                target_set := {}
+                for target in current["existing_targets"] { target_set[target] = true }
+                for target in node["existing_targets"] { target_set[target] = true }
+                current["existing_targets"] = sort(keys(target_set))
+                merged[key] = current
+            }
+        }
+    }
+    ids := sort(keys(merged))
+    if len(ids) > max_nodes { fail("node cap exceeded") }
+    result := range(0,len(ids)); index:=0
+    for id in ids { result[index] = merged[id]; index=index+1 }
+    return result
+}
+
+func insert_weighted(items, term, weight, limit) {
+    result := []
+    inserted := false
+    for item in items {
+        if !inserted && (weight > item["weight"] || (weight == item["weight"] && term < item["term"])) {
+            result = push(result, {"term":term,"weight":weight}); inserted = true
+        }
+        result = push(result, item)
+    }
+    if !inserted { result = push(result, {"term":term,"weight":weight}) }
+    if len(result) > limit { result = slice(result, 0, limit) }
+    return result
+}
+
+func insert_label(items, term, weight, order, limit) {
+    result := []; inserted := false
+    for item in items {
+        if !inserted && (weight > item["weight"] || (weight == item["weight"] && order < item["order"])) {
+            result=push(result,{"term":term,"weight":weight,"order":order}); inserted=true
+        }
+        result=push(result,item)
+    }
+    if !inserted { result=push(result,{"term":term,"weight":weight,"order":order}) }
+    if len(result)>limit { result=slice(result,0,limit) }
+    return result
+}
+
+func pad3(value) {
+    text:=to_string(value)
+    if len(text)==1{return "00"+text}
+    if len(text)==2{return "0"+text}
+    return text
+}
+
+func pad5(value) {
+    text:=to_string(value)
+    loop { if len(text)>=5{break}; text="0"+text }
+    return text
+}
+
+func build_vectors(nodes, max_df_ratio, previous_cache) {
+    docs := {}
+    df := {}
+    reused_tokenizations := 0
+    for node in nodes {
+        terms := []
+        if has_key(previous_cache,node["id"]) && previous_cache[node["id"]]["content_fingerprint"]==node["content_fingerprint"] {
+            terms=previous_cache[node["id"]]["terms"]
+            reused_tokenizations=reused_tokenizations+1
+        } else {
+            terms=tokens(node["title"] + " " + node["title"] + " " + node["text"])
+        }
+        docs[node["id"]] = terms
+        seen := {}
+        for term in terms { seen[term] = true }
+        for term in keys(seen) { df = dict_increment(df, term, 1) }
+    }
+    total := max(1, len(nodes))
+    vectors := {}
+    signals := {}
+    postings := {}
+    skipped_terms := []
+    for node in nodes {
+        counts := {}
+        for term in docs[node["id"]] { counts = dict_increment(counts, term, 1) }
+        weights := {}
+        norm_sq := 0.0
+        ranked := []
+        for term in sort(keys(counts)) {
+            if df[term] / total > max_df_ratio {
+                if !array_has(skipped_terms, term) { skipped_terms = push(skipped_terms, term) }
+                continue
+            }
+            weight := (1.0 + log(counts[term])) * (log((1.0 + total) / (1.0 + df[term])) + 1.0)
+            weights[term] = weight
+            norm_sq = norm_sq + weight * weight
+            ranked = insert_weighted(ranked, term, weight, 12)
+        }
+        norm := sqrt(norm_sq)
+        if norm == 0 { norm = 1.0 }
+        vector := {}
+        signal_terms := []
+        for item in ranked { signal_terms = push(signal_terms, item["term"]) }
+        for term in sort(keys(weights)) {
+            normalized := weights[term] / norm
+            vector[term] = normalized
+            if has_key(postings, term) == 0 { postings[term] = [] }
+            postings[term] = push(postings[term], {"node_id":node["id"],"weight":normalized})
+        }
+        vectors[node["id"]] = vector
+        signals[node["id"]] = signal_terms
+    }
+    cache_entries:=range(0,len(nodes)); cache_index:=0
+    for node in nodes {
+        cache_entries[cache_index]={"schema":"contentgraph.vector-cache-entry/v1","node_id":node["id"],"content_fingerprint":node["content_fingerprint"],"terms":docs[node["id"]]}
+        cache_index=cache_index+1
+    }
+    return {"vectors":vectors,"signals":signals,"postings":postings,"skipped_terms":sort(skipped_terms),"cache_entries":cache_entries,"reused_tokenizations":reused_tokenizations}
+}
+
+func load_vector_cache(run) {
+    result:={}
+    if run=="" { return result }
+    path:=path_join(run,"vector-cache.jsonl")
+    if !path_is_file(path) { return result }
+    for line in read_lines(path) {
+        if trim(line)=="" { continue }
+        entry:=validate_contract(parse_json(line),vector_cache_entry_schema(),"stored vector cache entry")
+        result[entry["node_id"]]=entry
+    }
+    return result
+}
+
+func find_root(parent, node_id) {
+    current := node_id
+    loop {
+        if parent[current] == current { return current }
+        parent[current] = parent[parent[current]]
+        current = parent[current]
+    }
+}
+
+func union_nodes(parent, left, right) {
+    a := find_root(parent, left); b := find_root(parent, right)
+    if a == b { return parent }
+    if a < b { parent[b] = a } else { parent[a] = b }
+    return parent
+}
+
+func insert_similarity(items, other_id, score, limit) {
+    result := []
+    inserted := false
+    for item in items {
+        if !inserted && (score > item["score"] || (score == item["score"] && other_id < item["node_id"])) {
+            result = push(result, {"node_id":other_id,"score":score}); inserted = true
+        }
+        result = push(result, item)
+    }
+    if !inserted { result = push(result, {"node_id":other_id,"score":score}) }
+    if len(result) > limit { result = slice(result, 0, limit) }
+    return result
+}
+
+func streaming_similarity(ids, vector_data, options) {
+    vectors := vector_data["vectors"]
+    postings := vector_data["postings"]
+    top := {}
+    parent := {}
+    for id in ids { top[id] = []; parent[id] = id }
+    candidate_pairs := 0
+    left_index := 0
+    loop {
+        if left_index >= len(ids) { break }
+        left := ids[left_index]
+        scores := {}
+        for term in sort(keys(vectors[left])) {
+            for posting in postings[term] {
+                right := posting["node_id"]
+                if right <= left { continue }
+                if has_key(scores, right) == 0 {
+                    candidate_pairs=candidate_pairs+1
+                    if candidate_pairs > options["max_candidate_pairs"] { fail("candidate-pair budget exceeded ("+to_string(options["max_candidate_pairs"])+"); raise max_candidate_pairs, lower max_term_document_frequency_ratio, or narrow the corpus") }
+                    scores[right] = 0.0
+                }
+                scores[right] = scores[right] + vectors[left][term] * posting["weight"]
+            }
+        }
+        rights := sort(keys(scores))
+        for right in rights {
+            score := scores[right]
+            if score >= options["min_similarity"] {
+                rounded := round(score * 1000000) / 1000000
+                top[left] = insert_similarity(top[left], right, rounded, options["max_related_per_node"])
+                top[right] = insert_similarity(top[right], left, rounded, options["max_related_per_node"])
+                if score >= options["cluster_threshold"] { parent = union_nodes(parent, left, right) }
+            }
+        }
+        left_index = left_index + 1
+    }
+    retained := {}
+    for left in ids {
+        for item in top[left] {
+            right := item["node_id"]
+            source := left; target := right
+            if target < source { source = right; target = left }
+            key := source + "|" + target
+            if has_key(retained, key) == 0 { retained[key] = {"source":source,"target":target,"score":item["score"]} }
+        }
+    }
+    similarities := []
+    for key in sort(keys(retained)) { similarities = push(similarities, retained[key]) }
+    return {"similarities":similarities,"top":top,"parent":parent,"candidate_pairs":candidate_pairs}
+}
+
+func build_clusters(ids, parent, signals, node_map) {
+    components := {}
+    for id in ids {
+        root := find_root(parent, id)
+        if has_key(components, root) == 0 { components[root] = [] }
+        components[root] = push(components[root], id)
+    }
+    # Deterministic size-descending order without an unbounded comparison sort.
+    component_order := {}
+    for root in keys(components) {
+        members:=sort(components[root])
+        component_order[pad5(20000-len(members))+"|"+members[0]]={"root":root,"members":members}
+    }
+    ordered := range(0,len(keys(component_order))); ordered_index:=0
+    for key in sort(keys(component_order)) { ordered[ordered_index]=component_order[key]; ordered_index=ordered_index+1 }
+    clusters := range(0,len(ordered)); cluster_index:=0
+    index := 1
+    for component in ordered {
+        term_counts := {}; term_order := {}; next_order:=0
+        for id in component["members"] {
+            signal_index := 0
+            for term in signals[id] {
+                if signal_index >= 8 { break }
+                if has_key(term_order,term)==0 { term_order[term]=next_order; next_order=next_order+1 }
+                term_counts = dict_increment(term_counts, term, 1); signal_index = signal_index + 1
+            }
+        }
+        ranked := []
+        for term in keys(term_counts) { ranked = insert_label(ranked, term, term_counts[term], term_order[term], 4) }
+        labels := []
+        for item in ranked { labels = push(labels, item["term"]) }
+        label := join(labels, " / ")
+        if label == "" { label = "unclassified" }
+        cluster_id := "cluster-" + pad3(index)
+        cluster := {"id":cluster_id,"label":label,"node_ids":component["members"],"size":len(component["members"]),"method":METHOD}
+        clusters[cluster_index] = cluster; cluster_index=cluster_index+1
+        for id in component["members"] {
+            member := node_map[id]
+            member["cluster"] = cluster_id
+            node_map[id] = member
+        }
+        index = index + 1
+    }
+    return {"clusters":clusters,"node_map":node_map}
+}
+
+func pair_has(pairs, source, target) { return has_key(pairs, source + "|" + target) }
+
+func render_json(value) { return to_json_pretty(value) + "\n" }
+
+func render_jsonl(values) {
+    lines := range(0,len(values)); index:=0
+    for value in values { lines[index] = to_json(value); index=index+1 }
+    if len(lines) == 0 { return "" }
+    return join(lines, "\n") + "\n"
+}
+
+func validate_artifacts(values) {
+    validate_contract(values["graph"], graph_schema(), "graph artifact")
+    offset:=0
+    loop {
+        if offset>=len(values["nodes"]){break}
+        batch:=slice(values["nodes"],offset,min(offset+500,len(values["nodes"])))
+        validate_contract(batch,{"type":"array","items":node_schema()},"node artifacts")
+        offset=offset+500
+    }
+    offset=0
+    loop {
+        if offset>=len(values["edges"]){break}
+        batch:=slice(values["edges"],offset,min(offset+1000,len(values["edges"])))
+        validate_contract(batch,{"type":"array","items":edge_schema()},"edge artifacts")
+        offset=offset+1000
+    }
+    wrapper_values:=[[values["clusters"],"contentgraph.clusters/v1","clusters","clusters artifact"],[values["overlaps"],"contentgraph.overlaps/v1","overlaps","overlaps artifact"],[values["orphans"],"contentgraph.orphans/v1","candidates","orphans artifact"],[values["opportunities"],"contentgraph.link-opportunities/v1","opportunities","link opportunities artifact"]]
+    for entry in wrapper_values {
+        items_value:=entry[0][entry[2]]; wrapper_offset:=0
+        if len(items_value)==0 { validate_contract(entry[0],wrapper_schema(entry[1],entry[2]),entry[3]) }
+        loop {
+            if wrapper_offset>=len(items_value){break}
+            chunk:={"schema":entry[1]};chunk[entry[2]]=slice(items_value,wrapper_offset,min(wrapper_offset+250,len(items_value)))
+            validate_contract(chunk,wrapper_schema(entry[1],entry[2]),entry[3])
+            wrapper_offset=wrapper_offset+250
+        }
+    }
+    analysis_header:={"schema":values["analysis"]["schema"],"components":[],"bridge_pages":[],"authorities":[],"hubs":[],"crawl_depth_drift":[],"cluster_health":[]}
+    validate_contract(analysis_header, analysis_schema(), "analysis artifact")
+    for field in ["components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health"] {
+        analysis_offset:=0
+        loop {
+            if analysis_offset>=len(values["analysis"][field]){break}
+            chunk:=analysis_header;chunk[field]=slice(values["analysis"][field],analysis_offset,min(analysis_offset+250,len(values["analysis"][field])))
+            validate_contract(chunk,analysis_schema(),"analysis artifact "+field)
+            analysis_offset=analysis_offset+250
+        }
+    }
+    validate_contract(values["metadata"], metadata_schema(), "metadata artifact")
+}
+
+func cleanup_staging(staging, names) {
+    for name in names { if path_exists(path_join(staging,name)) { delete_file(path_join(staging,name)) } }
+    if path_exists(staging) { os_rmdir(staging) }
+}
+
+func publish_artifacts(out, artifacts, maximum) {
+    if path_exists(out) { fail("output path already exists: " + out) }
+    parent := dirname(out)
+    create_dir(parent)
+    staging := path_join(parent, "." + basename(out) + ".tmp-" + uuid_v4())
+    create_dir(staging)
+    names := sort(keys(artifacts))
+    total := 0
+    for name in names {
+        path := path_join(staging, name)
+        write_file(path, artifacts[name])
+        total = total + file_size(path)
+    }
+    if total > maximum {
+        cleanup_staging(staging, names)
+        fail("output budget exceeded (" + to_string(total) + " > " + to_string(maximum) + " bytes)")
+    }
+    rename_file(staging, out)
+    return total
+}
+
+func input_fingerprint(budget, options) {
+    records := []
+    for file in budget["files"] { records = push(records, file["path"] + ":" + file["sha256"] + ":" + to_string(file["bytes"])) }
+    settings := {"min_similarity":options["min_similarity"],"cluster_threshold":options["cluster_threshold"],"overlap_threshold":options["overlap_threshold"],"max_related_per_node":options["max_related_per_node"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"]}
+    return sha256(join(sort(records), "\n") + "\n" + to_json(settings))
+}
+
+func try_incremental(options, fingerprint_value) {
+    previous := options["incremental_from"]
+    if previous == "" { return false }
+    metadata_path := path_join(previous, "metadata.json")
+    if !path_is_file(metadata_path) { fail("invalid incremental run: " + previous) }
+    metadata := parse_json(read_file(metadata_path))
+    if has_key(metadata, "cache") == 0 || value_or(metadata["cache"], "input_fingerprint", "") != fingerprint_value { return false }
+    artifacts := {}
+    for name in ARTIFACT_NAMES {
+        path := path_join(previous, name)
+        if !path_is_file(path) { fail("invalid incremental run, missing: " + name) }
+        artifacts[name] = read_file(path)
+    }
+    publish_artifacts(options["out"], artifacts, options["max_output_bytes"])
+    return true
+}
+
+func build_graph(options) {
+    total_inputs := len(options["source"])+len(options["siteprobe"])+len(options["sitemap"])+len(options["csv"])+len(options["cms"])
+    if total_inputs == 0 { fail("build requires source, siteprobe, sitemap, csv, or cms input") }
+    budget := {"used":0,"maximum":options["max_input_bytes"],"files":[]}
+    groups := []
+    existing_edges := []
+    for path in options["siteprobe"] { result := ingest_siteprobe(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]); existing_edges=concat(existing_edges,result["edges"]) }
+    for path in options["source"] { result := ingest_source(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
+    for path in options["sitemap"] { result := ingest_sitemap(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
+    for path in options["csv"] { result := ingest_csv(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
+    for path in options["cms"] { result := ingest_cms(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
+    nodes := merge_nodes(groups, options["max_nodes"])
+    search_result := add_search_associations(options["searchbridge"], nodes, budget)
+    search_edges := search_result["edges"]; nodes=search_result["nodes"]; budget=search_result["budget"]
+    fingerprint_value := input_fingerprint(budget, options)
+    if try_incremental(options, fingerprint_value) {
+        print(to_json({"run":options["out"],"cache":"hit"}))
+        return 0
+    }
+
+    node_map := {}
+    for node in nodes { node_map[node["id"]]=node }
+    ids := sort(keys(node_map))
+    vector_data := build_vectors(nodes, options["max_term_document_frequency_ratio"], load_vector_cache(options["incremental_from"]))
+    similarity := streaming_similarity(ids, vector_data, options)
+    similarities := similarity["similarities"]
+    cluster_result := build_clusters(ids, similarity["parent"], vector_data["signals"], node_map)
+    clusters := cluster_result["clusters"]; node_map=cluster_result["node_map"]
+    similarity_edges := []
+    for item in similarities {
+        shared := []
+        for term in vector_data["signals"][item["source"]] { if array_has(vector_data["signals"][item["target"]],term) { shared=push(shared,term) } }
+        if len(shared)>12 { shared=slice(shared,0,12) }
+        similarity_edges=push(similarity_edges,{"schema":"contentgraph.edge/v1","source":item["source"],"target":item["target"],"type":"lexical-similarity","method":METHOD,"weight":item["score"],"evidence":{"shared_terms":sort(shared)}})
+    }
+    edges := concat(concat(existing_edges,similarity_edges),search_edges)
+    # Stable edge ordering via canonical serialized keys.
+    edge_map := {}
+    for edge in edges { edge_map[edge["type"]+"|"+edge["source"]+"|"+edge["target"]] = edge }
+    edges=[]; for key in sort(keys(edge_map)) { edges=push(edges,edge_map[key]) }
+    incoming := {}; outgoing := {}; existing_pairs := {}
+    for edge in existing_edges {
+        incoming=dict_increment(incoming,edge["target"],1); outgoing=dict_increment(outgoing,edge["source"],1)
+        existing_pairs[edge["source"]+"|"+edge["target"]] = true
+    }
+    related := {}
+    for id in ids { related[id]=[] }
+    for item in similarities {
+        related[item["source"]]=push(related[item["source"]],{"node_id":item["target"],"score":item["score"],"method":METHOD})
+        related[item["target"]]=push(related[item["target"]],{"node_id":item["source"],"score":item["score"],"method":METHOD})
+    }
+    final_nodes := range(0,len(ids)); final_index:=0
+    for id in ids {
+        node := node_map[id]
+        counted_incoming:=value_or(incoming,id,0); counted_outgoing:=value_or(outgoing,id,0)
+        if counted_incoming>node["incoming_links"] { node["incoming_links"]=counted_incoming }
+        if counted_outgoing>node["outgoing_links"] { node["outgoing_links"]=counted_outgoing }
+        node["topic_signals"] = vector_data["signals"][id]
+        pages := []
+        for item in similarity["top"][id] { pages=push(pages,{"node_id":item["node_id"],"score":item["score"],"method":METHOD}) }
+        node["related_pages"] = pages
+        # Rebuild the public shape so internal text and target fields cannot leak.
+        public_node := {}
+        for pair in items(node) { if pair[0] != "text" && pair[0] != "existing_targets" { public_node[pair[0]]=pair[1] } }
+        final_nodes[final_index]=public_node; final_index=final_index+1
+    }
+    overlaps_map := {}
+    opportunities_map := {}
+    for item in similarities {
+        if item["score"] >= options["overlap_threshold"] { overlap_id:="overlap-"+substring(sha256(item["source"]+item["target"]),0,16); overlaps_map[overlap_id]={"id":overlap_id,"left":item["source"],"right":item["target"],"score":item["score"],"classification":"cannibalization-candidate","method":METHOD,"requires_intent_review":true} }
+        directions := [[item["source"],item["target"]],[item["target"],item["source"]]]
+        for direction in directions {
+            if pair_has(existing_pairs,direction[0],direction[1]) == 0 { opportunity_id:="link-"+substring(sha256(direction[0]+direction[1]),0,16); opportunities_map[opportunity_id]={"id":opportunity_id,"source":direction[0],"target":direction[1],"score":item["score"],"method":METHOD,"reason":"lexically related and not currently linked in this direction","requires_context_review":true} }
+        }
+    }
+    overlaps:=range(0,len(keys(overlaps_map))); overlap_index:=0; for key in sort(keys(overlaps_map)){overlaps[overlap_index]=overlaps_map[key];overlap_index=overlap_index+1}
+    opportunities:=range(0,len(keys(opportunities_map))); opportunity_index:=0; for key in sort(keys(opportunities_map)){opportunities[opportunity_index]=opportunities_map[key];opportunity_index=opportunity_index+1}
+    orphan_map := {}
+    for node in final_nodes {
+        if node["incoming_links"] <= 1 { classification := "weakly-connected"; if node["incoming_links"]==0 { classification="orphan" }; orphan_map[node["id"]]={"node_id":node["id"],"url":node["url"],"title":node["title"],"incoming_links":node["incoming_links"],"classification":classification} }
+    }
+    orphans:=range(0,len(keys(orphan_map))); orphan_index:=0; for key in sort(keys(orphan_map)){orphans[orphan_index]=orphan_map[key];orphan_index=orphan_index+1}
+    analysis := analyze_graph(final_nodes,edges,clusters)
+    run_id := basename(options["out"])
+    generated_at := now_utc()
+    if options["deterministic"] { run_id="deterministic"; generated_at="1970-01-01T00:00:00Z" }
+    graph_edges := range(0,len(edges)); graph_edge_index:=0
+    for edge in edges { graph_edges[graph_edge_index]={"source":edge["source"],"target":edge["target"],"type":edge["type"],"weight":edge["weight"]}; graph_edge_index=graph_edge_index+1 }
+    graph := {"schema":"contentgraph.graph/v1","run_id":run_id,"generated_at":generated_at,"method":METHOD,"nodes":ids,"edges":graph_edges}
+    clusters_doc := {"schema":"contentgraph.clusters/v1","clusters":clusters}
+    overlaps_doc := {"schema":"contentgraph.overlaps/v1","overlaps":overlaps}
+    orphans_doc := {"schema":"contentgraph.orphans/v1","candidates":orphans}
+    opportunities_doc := {"schema":"contentgraph.link-opportunities/v1","opportunities":opportunities}
+    metadata := {"schema":"contentgraph.metadata/v1","run_id":run_id,"inputs":{"siteprobe":options["siteprobe"],"source":options["source"],"searchbridge":options["searchbridge"],"sitemap":options["sitemap"],"csv":options["csv"],"cms":options["cms"]},"adapters":{"source":"contentgraph.source-files/v1","siteprobe":"siteprobe.run/v1","searchbridge":"searchbridge.result/v1","sitemap":"contentgraph.sitemap-xml/v1","csv":"contentgraph.csv-export/v1","cms":"contentgraph.cms-export/v1"},"thresholds":{"minimum":options["min_similarity"],"cluster":options["cluster_threshold"],"overlap":options["overlap_threshold"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"]},"budgets":{"max_nodes":options["max_nodes"],"max_input_bytes":options["max_input_bytes"],"max_output_bytes":options["max_output_bytes"],"max_report_tokens":options["max_report_tokens"],"max_candidate_pairs":options["max_candidate_pairs"],"max_related_per_node":options["max_related_per_node"]},"usage":{"input_bytes":budget["used"],"candidate_pairs":similarity["candidate_pairs"],"retained_similarity_pairs":len(similarities),"skipped_high_frequency_terms":vector_data["skipped_terms"],"reused_tokenizations":vector_data["reused_tokenizations"]},"counts":{"nodes":len(final_nodes),"edges":len(edges),"clusters":len(clusters),"overlaps":len(overlaps),"orphans":len(orphans),"link_opportunities":len(opportunities)},"cache":{"input_fingerprint":fingerprint_value,"input_dependencies":budget["files"],"incremental_from":options["incremental_from"],"hit":false},"engine":{"language":"kujo","contract":"contentgraph.native-engine/v1"}}
+    values := {"graph":graph,"nodes":final_nodes,"edges":edges,"clusters":clusters_doc,"overlaps":overlaps_doc,"orphans":orphans_doc,"opportunities":opportunities_doc,"analysis":analysis,"metadata":metadata}
+    validate_artifacts(values)
+    report := "# ContentGraph Report\n\nRun: "+run_id+"\n\n## Attention\n\n- Orphan or weak candidates: "+to_string(len(orphans))+"\n- High-overlap candidates requiring intent review: "+to_string(len(overlaps))+"\n- Contextual link opportunities requiring review: "+to_string(len(opportunities))+"\n- Bridge-page candidates: "+to_string(len(analysis["bridge_pages"]))+"\n- Crawl-depth drift candidates: "+to_string(len(analysis["crawl_depth_drift"]))+"\n\n## Coverage\n\n- Content nodes: "+to_string(len(final_nodes))+"\n- Relationship edges: "+to_string(len(edges))+"\n- Topic clusters: "+to_string(len(clusters))+"\n- Connected components: "+to_string(len(analysis["components"]))+"\n\nMethod: `"+METHOD+"`. Full evidence remains in the run directory.\nReport budget: "+to_string(options["max_report_tokens"])+" approximate tokens.\n"
+    cache_offset:=0
+    loop { if cache_offset>=len(vector_data["cache_entries"]){break}; validate_contract(slice(vector_data["cache_entries"],cache_offset,min(cache_offset+500,len(vector_data["cache_entries"]))),{"type":"array","items":vector_cache_entry_schema()},"vector cache artifact"); cache_offset=cache_offset+500 }
+    artifacts := {"graph.json":render_json(graph),"nodes.jsonl":render_jsonl(final_nodes),"edges.jsonl":render_jsonl(edges),"clusters.json":render_json(clusters_doc),"overlaps.json":render_json(overlaps_doc),"orphan-candidates.json":render_json(orphans_doc),"link-opportunities.json":render_json(opportunities_doc),"analysis.json":render_json(analysis),"metadata.json":render_json(metadata),"report.md":report,"vector-cache.jsonl":render_jsonl(vector_data["cache_entries"])}
+    hashes:={};for name in sort(keys(artifacts)){hashes[name]=sha256(artifacts[name])}
+    manifest:=validate_contract({"schema":"contentgraph.manifest/v1","artifacts":hashes},manifest_schema(),"manifest artifact")
+    artifacts["manifest.json"]=render_json(manifest)
+    output_bytes := publish_artifacts(options["out"],artifacts,options["max_output_bytes"])
+    result := {"run":options["out"],"counts":metadata["counts"],"usage":metadata["usage"],"output_bytes":output_bytes,"cache":"miss"}
+    if options["json"] { print(to_json(result)) } else { print("ContentGraph build complete: "+options["out"]); print("Nodes: "+to_string(len(final_nodes))+"  Edges: "+to_string(len(edges))) }
+    return 0
+}
+
+export ARTIFACT_NAMES := ARTIFACT_NAMES
+export METHOD := METHOD
+export build_graph := build_graph
+export validate_artifacts := validate_artifacts
+export render_json := render_json
+export fail := fail

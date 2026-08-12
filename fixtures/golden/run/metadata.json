@@ -1,0 +1,77 @@
+{
+  "adapters": {
+    "cms": "contentgraph.cms-export/v1",
+    "csv": "contentgraph.csv-export/v1",
+    "searchbridge": "searchbridge.result/v1",
+    "sitemap": "contentgraph.sitemap-xml/v1",
+    "siteprobe": "siteprobe.run/v1",
+    "source": "contentgraph.source-files/v1"
+  },
+  "budgets": {
+    "max_candidate_pairs": 2000000,
+    "max_input_bytes": 536870912,
+    "max_nodes": 5000,
+    "max_output_bytes": 268435456,
+    "max_related_per_node": 20,
+    "max_report_tokens": 2000
+  },
+  "cache": {
+    "hit": false,
+    "incremental_from": "",
+    "input_dependencies": [
+      {
+        "bytes": 206,
+        "path": "fixtures/source/guide-a.md",
+        "sha256": "c538795fe45706225a3ade21dbe7f94908af4a81fdbaa3eb13101dd49485ebbf"
+      },
+      {
+        "bytes": 191,
+        "path": "fixtures/source/guide-b.md",
+        "sha256": "1d0c4c2395283475bd0e2785fdbc37313a8f38e644174aa36786dee5a9e72957"
+      },
+      {
+        "bytes": 175,
+        "path": "fixtures/source/unrelated.md",
+        "sha256": "f1c29b5a5a2f75eab9203b0bc9f86500ff695dbc729112e2f1a087ceacfcfdec"
+      }
+    ],
+    "input_fingerprint": "0e406b42067f779d07e4e4efd0d7c0568111f2b0f7ed61e8a71df5adc2cda2aa"
+  },
+  "counts": {
+    "clusters": 2,
+    "edges": 1,
+    "link_opportunities": 2,
+    "nodes": 3,
+    "orphans": 3,
+    "overlaps": 1
+  },
+  "engine": {
+    "contract": "contentgraph.native-engine/v1",
+    "language": "kujo"
+  },
+  "inputs": {
+    "cms": [],
+    "csv": [],
+    "searchbridge": [],
+    "sitemap": [],
+    "siteprobe": [],
+    "source": [
+      "fixtures/source"
+    ]
+  },
+  "run_id": "deterministic",
+  "schema": "contentgraph.metadata/v1",
+  "thresholds": {
+    "cluster": 0.2,
+    "max_term_document_frequency_ratio": 1.0,
+    "minimum": 0.12,
+    "overlap": 0.25
+  },
+  "usage": {
+    "candidate_pairs": 1,
+    "input_bytes": 572,
+    "retained_similarity_pairs": 1,
+    "reused_tokenizations": 0,
+    "skipped_high_frequency_terms": []
+  }
+}

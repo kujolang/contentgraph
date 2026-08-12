@@ -1,0 +1,15 @@
+{
+  "schema": "searchbridge.result/v1",
+  "capability": "search.performance",
+  "provider": "fixture",
+  "retrieved_at": "2026-08-12T00:00:00Z",
+  "rows": [
+    {
+      "page": "https://example.com/csv-guide",
+      "query": "deterministic content graph",
+      "clicks": 5,
+      "impressions": 50,
+      "position": 3.2
+    }
+  ]
+}
