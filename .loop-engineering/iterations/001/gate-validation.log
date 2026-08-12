@@ -1,27 +1,122 @@
-test_deterministic_rerun_cache_invalidation_and_budgets (__main__.ContentGraphTests) ... ok
-test_doctor_and_invalid_input (__main__.ContentGraphTests) ... ok
-test_malformed_inputs_path_fuzz_and_read_only_boundary (__main__.ContentGraphTests) ... ok
-test_portable_ids_input_and_candidate_budgets (__main__.ContentGraphTests) ... ok
-test_scale_budget (__main__.ContentGraphTests) ... ok
-test_siteprobe_ingestion_orphans_and_compare (__main__.ContentGraphTests) ... ok
-test_source_build_relationships_and_exports (__main__.ContentGraphTests) ... ok
-
-----------------------------------------------------------------------
-Ran 7 tests in 14.744s
-
-OK
 check passed: src/main.kujo
+check passed: src/text.kujo
+check passed: src/contracts.kujo
+check passed: src/ingest.kujo
+check passed: src/analytics.kujo
+check passed: src/engine.kujo
 check passed: scripts/benchmark.kujo
-test_deterministic_rerun_cache_invalidation_and_budgets (__main__.ContentGraphTests) ... ok
-test_doctor_and_invalid_input (__main__.ContentGraphTests) ... ok
-test_malformed_inputs_path_fuzz_and_read_only_boundary (__main__.ContentGraphTests) ... ok
-test_portable_ids_input_and_candidate_budgets (__main__.ContentGraphTests) ... ok
-test_scale_budget (__main__.ContentGraphTests) ... ok
-test_siteprobe_ingestion_orphans_and_compare (__main__.ContentGraphTests) ... ok
-test_source_build_relationships_and_exports (__main__.ContentGraphTests) ... ok
-
-----------------------------------------------------------------------
-Ran 7 tests in 14.762s
-
-OK
-ContentGraph validation passed.
+check passed: scripts/profile-scale.kujo
+check passed: scripts/package-release.kujo
+check passed: scripts/validate-schemas.kujo
+ContentGraph native validation passed.
+Validated 17 JSON Schemas with Kujo.
+.loop-engineering/iterations/001/diff.patch:7: trailing whitespace.
++ 
+.loop-engineering/iterations/001/diff.patch:54: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:68: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:77: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:85: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:97: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:132: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:143: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:145: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:175: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:178: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:191: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:198: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:206: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:214: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:229: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:235: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:265: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:273: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:285: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:304: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:335: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:544: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:545: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:550: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:551: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:555: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:556: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:583: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:584: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:588: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:589: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:608: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:609: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:642: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:643: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:662: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:663: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:667: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:668: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:683: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:774: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:787: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:788: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:797: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:810: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:811: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:841: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:842: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:883: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:887: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:888: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:902: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:910: trailing whitespace.
++- 
+.loop-engineering/iterations/001/diff.patch:922: trailing whitespace.
++- 

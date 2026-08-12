@@ -2,21 +2,21 @@
 
 ## Verdict
 
-success
+blocked
 
 ## Completed
 
-- configured loop run completed through iteration 1
+- configured loop run completed through iteration 3
 
 ## Verification
 
-- passed: validation, benchmark, diff_check
+- passed: benchmark, release_bundle, benchmark, release_bundle, benchmark, release_bundle
 - blocked: none
-- failed: none
+- failed: validation, diff_check, validation, diff_check, validation, diff_check
 
 ## Commits
 
-- Loop engineering: Review and harden ContentGraph for production use, improve performance/security/functionality, normalize the src layout, increase direct Kujo tooling, update documentation, and leave a verified next-session backlog.
+- Loop engineering: Complete every item and exit criterion in docs/next-session-review.md for ContentGraph 0.2.0.
 
 ## Remaining
 
@@ -28,4 +28,4 @@ success
 
 ## Next Start
 
-- success: required gates passed
+- repeated-failure: required gate failed 3 times
