@@ -5,6 +5,8 @@
 - Propagate configured Kujo runtime paths through the complete validation suite.
 - Configure the hosted Windows runner's OpenSSL installation for native Kujo builds.
 - Upgrade pinned checkout actions to the Node.js 24-compatible v7 release.
+- Canonicalize artifact JSON and enforce portable fixture line endings for
+  byte-identical deterministic output across supported operating systems.
 
 ## 0.2.0 - 2026-08-12
 

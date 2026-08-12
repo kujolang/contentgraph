@@ -149,7 +149,7 @@ Validation checks every Kujo module, runs native adversarial, property,
 differential, schema, incremental, adapter, GraphML, and byte-golden tests,
 validates JSON schema syntax, and checks patch whitespace. The benchmark corpus
 is generated and analyzed by Kujo. See [demo](docs/demo.md), [platform support](docs/platform-support.md),
-[upgrade/rollback](docs/upgrade-rollback.md), and [release qualification](docs/release-qualification-0.2.0.md).
+[upgrade/rollback](docs/upgrade-rollback.md), and [release qualification](docs/release-qualification-0.2.1.md).
 [Contract compatibility](docs/compatibility.md) documents additive v1 evolution
 and legacy-run behavior. The [0.2 completion audit](docs/completion-audit-0.2.0.md)
 maps every hardening requirement to evidence; the [0.3 review](docs/next-session-review-0.3.md)

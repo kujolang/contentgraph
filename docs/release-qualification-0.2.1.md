@@ -1,7 +1,7 @@
-# ContentGraph 0.2.0 release qualification
+# ContentGraph 0.2.1 release qualification
 
-Status: locally qualified; remote CI and artifact attestation are verified from
-the tagged release after publication.
+Status: qualified for tagged publication. The GitHub release is the source of
+record for remote CI, checksums, SBOM, provenance, and build attestation.
 
 The native Kujo validation covers byte-golden deterministic output, runtime
 JSON Schema contracts, configuration precedence, adapters, GraphML query-node
@@ -39,3 +39,6 @@ tested by `max_candidate_pairs`; real-corpus medians remain a 0.3 opportunity.
   SHA-256 values, and every `SHA256SUMS` entry verified.
 - Upgrade/rollback and v0.1 read compatibility: documented and tested.
 - Scoped source/security review: no open high-severity finding.
+- Linux, macOS, and Windows launchers are exercised by the pinned, cached CI
+  matrix; repository text fixtures use explicit line-ending policy so byte
+  determinism is independent of checkout platform.

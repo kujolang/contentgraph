@@ -1,1 +1,1 @@
-{"candidate_pairs":0,"engine":"kujo","harness":"kujo","nodes":1000,"output_bytes":1688392,"peak_rss_bytes":127270912,"retained_similarity_pairs":0,"schema":"contentgraph.benchmark/v1","seconds":19.907825481,"skipped_high_frequency_terms":["corpus","highfrequency","page","shared","topic"]}
+{"candidate_pairs":0,"engine":"kujo","harness":"kujo","nodes":1000,"output_bytes":1384556,"peak_rss_bytes":121356288,"retained_similarity_pairs":0,"schema":"contentgraph.benchmark/v1","seconds":24.803937279,"skipped_high_frequency_terms":["corpus","highfrequency","page","shared","topic"]}
