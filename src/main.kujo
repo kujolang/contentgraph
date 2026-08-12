@@ -12,7 +12,7 @@ func default_options() {
         "out":"","incremental_from":"","min_similarity":0.12,"cluster_threshold":0.20,
         "overlap_threshold":0.55,"max_nodes":5000,"max_input_bytes":536870912,
         "max_output_bytes":268435456,"max_report_tokens":2000,"max_candidate_pairs":2000000,
-        "max_related_per_node":20,"max_term_document_frequency_ratio":1.0,
+        "max_related_per_node":20,"max_term_document_frequency_ratio":1.0,"max_analysis_items":1000,
         "deterministic":false,"json":false
     }
 }
@@ -74,6 +74,7 @@ func parse_build_options(argv) {
         if arg=="--max-candidate-pairs" { options["max_candidate_pairs"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
         if arg=="--max-related-per-node" { options["max_related_per_node"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
         if arg=="--max-term-document-frequency-ratio" { options["max_term_document_frequency_ratio"]=to_float(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--max-analysis-items" { options["max_analysis_items"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
         if arg=="--deterministic" { options["deterministic"]=true; i=i+1; continue }
         if arg=="--json" { options["json"]=true; i=i+1; continue }
         fail("unknown build option: "+arg)
@@ -88,6 +89,7 @@ func parse_build_options(argv) {
     if options["max_input_bytes"]<1024 || options["max_output_bytes"]<1024 || options["max_report_tokens"]<64 || options["max_candidate_pairs"]<1 { fail("resource budgets are outside safe limits") }
     if options["max_related_per_node"]<1 || options["max_related_per_node"]>1000 { fail("max_related_per_node must be between 1 and 1000") }
     if options["max_term_document_frequency_ratio"]<0 || options["max_term_document_frequency_ratio"]>1 { fail("max_term_document_frequency_ratio must be between 0 and 1") }
+    if options["max_analysis_items"]<1 || options["max_analysis_items"]>20000 { fail("max_analysis_items must be between 1 and 20000") }
     return options
 }
 
@@ -188,7 +190,7 @@ func doctor_report() {
     kujo_ok:=kujo.exitcode==0
     python_ok:=python.exitcode==0
     overall_ok:=kujo_ok && fs_ok
-    return {"schema":"contentgraph.doctor/v1","ok":overall_ok,"engine":{"language":"kujo","native":true,"contract":"contentgraph.native-engine/v1"},"runtime":{"kujo":{"ok":kujo_ok,"version":trim(kujo.stdout),"binary":kujo_bin},"python":{"required":false,"available":python_ok,"version":trim(python.stdout+python.stderr)}},"filesystem":{"temporary_read_write_delete":fs_ok},"network_required":false,"paid_api_required":false,"method":METHOD,"contracts":{"graph":"contentgraph.graph/v1","config":"contentgraph.config/v1"},"safe_limits":{"max_nodes_hard":20000,"max_nodes_default":5000,"max_input_bytes_default":536870912,"max_output_bytes_default":268435456,"max_candidate_pairs_default":2000000,"guidance":"Lower max_term_document_frequency_ratio for dense high-frequency corpora."}}
+    return {"schema":"contentgraph.doctor/v1","ok":overall_ok,"engine":{"language":"kujo","native":true,"contract":"contentgraph.native-engine/v1"},"runtime":{"kujo":{"ok":kujo_ok,"version":trim(kujo.stdout),"binary":kujo_bin},"python":{"required":false,"available":python_ok,"version":trim(python.stdout+python.stderr)}},"filesystem":{"temporary_read_write_delete":fs_ok},"network_required":false,"paid_api_required":false,"method":METHOD,"contracts":{"graph":"contentgraph.graph/v1","config":"contentgraph.config/v1"},"safe_limits":{"max_nodes_hard":20000,"max_nodes_default":5000,"max_input_bytes_default":536870912,"max_output_bytes_default":268435456,"max_candidate_pairs_default":2000000,"max_analysis_items_default":1000,"guidance":"Lower max_term_document_frequency_ratio for dense high-frequency corpora."}}
 }
 
 func usage() {

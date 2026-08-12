@@ -84,5 +84,12 @@
     }
   ],
   "method": "deterministic-graph-analysis/v1",
-  "schema": "contentgraph.analysis/v1"
+  "schema": "contentgraph.analysis/v1",
+  "summary": {
+    "cluster_count": 2,
+    "cluster_health_truncated": false,
+    "component_count": 2,
+    "components_truncated": false,
+    "detail_limit": 1000
+  }
 }

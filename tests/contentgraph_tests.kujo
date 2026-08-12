@@ -75,6 +75,7 @@ for cluster in clusters { for id in cluster["node_ids"] { if has_key(seen,id)==0
 for id in graph["nodes"] { check_equal(seen[id],1) }
 analysis:=parse_json(read_file(path_join(first,"analysis.json")))
 check_true(has_key(analysis,"components")==1); check_true(has_key(analysis,"cluster_health")==1); check_true(has_key(analysis,"bridge_pages")==1)
+check_equal(analysis["summary"]["component_count"],len(analysis["components"]))
 
 # Backward compatibility: 0.1 graph runs did not contain analysis.json.
 legacy:=path_join(root,"legacy");create_dir(legacy)

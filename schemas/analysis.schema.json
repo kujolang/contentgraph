@@ -3,9 +3,10 @@
   "$id": "https://schemas.kujolang.ai/contentgraph/analysis.v1.json",
   "title": "ContentGraph analysis v1",
   "type": "object",
-  "required": ["schema", "components", "bridge_pages", "authorities", "hubs", "crawl_depth_drift", "cluster_health"],
+  "required": ["schema", "summary", "components", "bridge_pages", "authorities", "hubs", "crawl_depth_drift", "cluster_health"],
   "properties": {
     "schema": {"const": "contentgraph.analysis/v1"},
+    "summary": {"type": "object"},
     "components": {"type": "array"},
     "bridge_pages": {"type": "array"},
     "authorities": {"type": "array"},

@@ -29,6 +29,7 @@
         "max_candidate_pairs": {"type": "integer", "minimum": 1},
         "max_related_per_node": {"type": "integer", "minimum": 1, "maximum": 1000},
         "max_term_document_frequency_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_analysis_items": {"type": "integer", "minimum": 1, "maximum": 20000},
         "deterministic": {"type": "boolean"},
         "json": {"type": "boolean"}
       }

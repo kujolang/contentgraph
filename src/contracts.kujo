@@ -78,7 +78,7 @@ func metadata_schema() {
 }
 
 func analysis_schema() {
-    return {"type":"object","required":["schema","components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health"],"properties":{"schema":{"const":"contentgraph.analysis/v1"}}}
+    return {"type":"object","required":["schema","summary","components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health"],"properties":{"schema":{"const":"contentgraph.analysis/v1"},"summary":{"type":"object"}}}
 }
 
 func manifest_schema() {
@@ -165,6 +165,7 @@ func config_schema() {
                     "max_candidate_pairs":{"type":"integer","minimum":1},
                     "max_related_per_node":{"type":"integer","minimum":1,"maximum":1000},
                     "max_term_document_frequency_ratio":{"type":"number","minimum":0,"maximum":1},
+                    "max_analysis_items":{"type":"integer","minimum":1,"maximum":20000},
                     "deterministic":{"type":"boolean"},
                     "json":{"type":"boolean"}
                 }

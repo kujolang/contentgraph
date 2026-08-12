@@ -1,6 +1,6 @@
 # ContentGraph
 
-[![Version](https://img.shields.io/badge/version-0.1.0-black)](VERSION)
+[![Version](https://img.shields.io/badge/version-0.2.0-black)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
@@ -15,10 +15,9 @@ agent workflows that need evidence rather than opaque recommendations.
 
 ## Requirements and installation
 
-- Python 3.10 or newer for the current compatibility engine.
-- A current Kujo runtime. By default the launchers use
+- Kujo 1.0 or newer. By default the launchers use
   `../kujo/target/release/kujo`; set `KUJO_BIN` to use another binary.
-- No third-party Python packages.
+- No Python, third-party packages, model keys, or hosted services.
 
 ```bash
 git clone https://github.com/kujolang/contentgraph.git
@@ -27,11 +26,11 @@ export KUJO_BIN=/absolute/path/to/kujo
 ./contentgraph doctor
 ```
 
-The public CLI and benchmark harness are Kujo programs in `src/main.kujo` and
-`scripts/benchmark.kujo`. Deterministic parsing and sparse lexical scoring are
-currently isolated in `src/contentgraph.py` while those primitives migrate to
-Kujo. This boundary is explicit: ContentGraph does not present a Python wrapper
-as a native Kujo implementation.
+`doctor` is JSON by default; `./contentgraph doctor --json` is accepted for
+explicit automation intent.
+
+The complete engine, CLI, contracts, adapters, analytics, tests, benchmark, and
+release packager are implemented directly in Kujo under `src/` and `scripts/`.
 
 ## Quick start
 
@@ -49,8 +48,18 @@ Inputs can be repeated and combined:
 ./contentgraph build \
   --siteprobe /path/to/.siteprobe/run \
   --source ./docs \
+  --sitemap ./sitemap.xml \
+  --csv ./content-export.csv \
+  --cms ./cms-export.json \
   --searchbridge /path/to/search-performance.json \
   --out .contentgraph/combined
+```
+
+Store repeatable build settings in a versioned TOML or JSON file and override
+individual values on the command line:
+
+```bash
+./contentgraph build --config contentgraph.example.toml --max-nodes 10000
 ```
 
 Source discovery accepts Markdown, HTML, JSON, and text files, ignores known
@@ -58,11 +67,15 @@ generated/dependency directories, rejects symlink escapes, and never modifies
 input content. Local-file node IDs derive from portable relative paths; URL
 nodes derive from canonical URLs.
 
+Adapter contract names are recorded in `metadata.json`. Incremental builds use
+`--incremental-from RUN`; the cache fingerprint covers scoring settings plus
+the path, byte count, and SHA-256 digest of every input dependency.
+
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `doctor` | Report runtime boundaries and deterministic method. |
+| `doctor` | Emit a machine-readable Kujo/runtime/filesystem compatibility report. |
 | `build` | Produce a versioned graph and review artifacts. |
 | `inspect` | Return one node and all stored relationships. |
 | `related` | Rank retained lexical relationships by score. |
@@ -70,6 +83,7 @@ nodes derive from canonical URLs.
 | `clusters` | Show deterministic connected topic clusters. |
 | `overlaps` | Show high-overlap candidates requiring intent review. |
 | `link-opportunities` | Show missing directed-link candidates requiring context review. |
+| `analysis` | Show components, centrality, bridge pages, hubs/authorities, depth drift, and cluster health. |
 | `compare` | Compare nodes, fingerprints, clusters, links, and edge weights. |
 | `export` | Export graph JSON or standards-compliant GraphML. Existing files require `--force`. |
 | `version` | Print version and schema/method contracts. |
@@ -88,12 +102,15 @@ Errors are concise, written to stderr, and do not include Python tracebacks.
 | `--max-input-bytes` | 512 MiB | Aggregate bytes read from accepted inputs. |
 | `--max-candidate-pairs` | 2,000,000 | Sparse similarity work/memory ceiling. |
 | `--max-related-per-node` | 20 | Retained nearest relationships per node. |
+| `--max-term-document-frequency-ratio` | 1.0 | Ignore terms appearing in a larger fraction of documents. |
+| `--max-analysis-items` | 1,000 | Maximum detailed component, cluster-health, and drift entries (totals remain in `analysis.summary`). |
 | `--max-output-bytes` | 256 MiB | Complete artifact-set ceiling. |
 | `--max-report-tokens` | 2,000 | Declared human-report budget. |
 
-The sparse inverted index skips document pairs with no shared terms. Candidate
-pairs can still grow quadratically for uniformly dense corpora, so the explicit
-pair ceiling prevents accidental resource exhaustion. Artifacts are rendered
+The sparse streaming/top-k scorer holds candidate scores for one source node at
+a time and skips pairs with no retained shared term. Candidate pairs can still
+grow quadratically for uniformly dense corpora, so the explicit pair ceiling
+and document-frequency filter prevent accidental resource exhaustion. Artifacts are rendered
 and budget-checked before a temporary directory is atomically promoted; a
 failed budget check does not leave a partial run.
 
@@ -101,7 +118,10 @@ failed budget check does not leave a partial run.
 
 Each run contains `graph.json`, `nodes.jsonl`, `edges.jsonl`, `clusters.json`,
 `overlaps.json`, `orphan-candidates.json`, `link-opportunities.json`,
-`metadata.json`, and `report.md`. Metadata records configured budgets and actual
+`analysis.json`, `metadata.json`, `report.md`, `vector-cache.jsonl`, and
+`manifest.json`. The vector cache stores normalized terms (never source bodies)
+so changed builds can reuse unchanged tokenization. The manifest
+binds every other artifact to a SHA-256 digest. Metadata records configured budgets and actual
 input-byte, candidate-pair, and retained-pair usage. Relationships label their
 evidence method as `deterministic-lexical/v1`, `existing-internal-link`, or
 `measured-provider-evidence`.
@@ -125,16 +145,20 @@ bash scripts/validate.sh
 ./contentgraph-benchmark --nodes 1000
 ```
 
-Validation compiles the Python engine and Kujo programs, runs adversarial and
-deterministic tests through both layers, validates JSON schema syntax, and
-checks patch whitespace. The benchmark corpus is generated and orchestrated by
-Kujo. See [release qualification](docs/release-qualification-0.1.0.md) and the
-[next-session engineering review](docs/next-session-review.md).
+Validation checks every Kujo module, runs native adversarial, property,
+differential, schema, incremental, adapter, GraphML, and byte-golden tests,
+validates JSON schema syntax, and checks patch whitespace. The benchmark corpus
+is generated and analyzed by Kujo. See [demo](docs/demo.md), [platform support](docs/platform-support.md),
+[upgrade/rollback](docs/upgrade-rollback.md), and [release qualification](docs/release-qualification-0.2.0.md).
+[Contract compatibility](docs/compatibility.md) documents additive v1 evolution
+and legacy-run behavior. The [0.2 completion audit](docs/completion-audit-0.2.0.md)
+maps every hardening requirement to evidence; the [0.3 review](docs/next-session-review-0.3.md)
+contains the next additive opportunity list.
 
-## Maturity
+## Enterprise readiness
 
-The 0.1 line is production-minded and fixture-qualified, but not yet claimed as
-enterprise-certified. Native Kujo engine migration, independent large-corpus
-profiling, signed release artifacts, and broader interoperability validation
-remain explicit next milestones. This honest boundary keeps the project useful
-today without overstating operational proof.
+ContentGraph 0.2 is a native-Kujo, offline, bounded, schema-validated reference
+implementation. Tagged releases are validated on Linux, macOS, and Windows,
+packaged with checksums, CycloneDX SBOM and SLSA-shaped provenance, and signed by
+GitHub artifact attestations. See the qualification record for exact performance
+envelopes and remaining operational assumptions.

@@ -8,6 +8,7 @@
     "source": "contentgraph.source-files/v1"
   },
   "budgets": {
+    "max_analysis_items": 1000,
     "max_candidate_pairs": 2000000,
     "max_input_bytes": 536870912,
     "max_nodes": 5000,
@@ -35,7 +36,7 @@
         "sha256": "f1c29b5a5a2f75eab9203b0bc9f86500ff695dbc729112e2f1a087ceacfcfdec"
       }
     ],
-    "input_fingerprint": "0e406b42067f779d07e4e4efd0d7c0568111f2b0f7ed61e8a71df5adc2cda2aa"
+    "input_fingerprint": "64f52d7c43ce260829138c2745d0d8c6966f0811930451516d05ee7d0d7f736b"
   },
   "counts": {
     "clusters": 2,
