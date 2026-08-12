@@ -1,7 +1,7 @@
 from src.engine import METHOD, ARTIFACT_NAMES, build_graph, fail
 from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, doctor_schema, config_schema
 
-VERSION := "0.2.0"
+VERSION := "0.2.1"
 LEGACY_ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","metadata.json","report.md"]
 
 func value_or(mapping, key, fallback) { if has_key(mapping,key) { return mapping[key] }; return fallback }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-08-12
+
+- Propagate configured Kujo runtime paths through the complete validation suite.
+- Configure the hosted Windows runner's OpenSSL installation for native Kujo builds.
+- Upgrade pinned checkout actions to the Node.js 24-compatible v7 release.
+
 ## 0.2.0 - 2026-08-12
 
 - Normalize implementation files under `src/` and replace the Python benchmark
