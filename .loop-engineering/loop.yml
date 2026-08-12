@@ -29,7 +29,7 @@ eval_gates:
     required: true
 
   - id: diff_check
-    command: "git diff --check -- . ':(exclude).loop-engineering'"
+    command: "bash scripts/diff-check.sh"
     required: true
 
 commit:

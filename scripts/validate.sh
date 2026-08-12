@@ -17,5 +17,5 @@ for source in src/*.kujo scripts/*.kujo tests/*.kujo; do "$KUJO_RUNTIME" lint "$
 "$KUJO_RUNTIME" run tests/contentgraph_tests.kujo
 ./contentgraph doctor >/dev/null
 "$KUJO_RUNTIME" run scripts/validate-schemas.kujo
-git diff --check -- . ':(exclude).loop-engineering'
+bash scripts/diff-check.sh
 printf 'ContentGraph validation passed.\n'
