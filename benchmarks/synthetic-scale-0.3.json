@@ -1,0 +1,22 @@
+{
+  "schema": "contentgraph.synthetic-comparison/v1",
+  "classification": "synthetic-generated-csv",
+  "hardware": "MacBookPro16,1; 6-Core Intel Core i7 2.6 GHz; 16 GiB; macOS 26.3.1",
+  "shape": {
+    "nodes": 5000,
+    "shared_terms_per_document": 5,
+    "max_term_document_frequency_ratio": 0.05,
+    "candidate_pairs": 0
+  },
+  "baseline_0_2_1": {
+    "seconds": {"samples": [171.238276759, 139.545956955, 122.55809562900001], "median": 139.545956955, "variance": 406.97228909333603},
+    "peak_rss_bytes": {"samples": [475914240, 474918912, 473964544], "median": 474918912, "variance": 633645622158.2223},
+    "output_bytes": 5816556
+  },
+  "candidate_0_3_0": {
+    "seconds": {"samples": [120.619602365, 151.35777198099998, 142.667951209], "median": 142.667951209, "variance": 167.3864159042425},
+    "peak_rss_bytes": {"samples": [474955776, 477016064, 463044608], "median": 474955776, "variance": 37924699169678.22},
+    "output_bytes": 9083720
+  },
+  "interpretation": "This zero-candidate CSV shape is memory-neutral because the additive parsed CSV cache increases output size. It is not used as evidence for streaming memory reduction; the candidate-bearing field comparison is the release criterion."
+}

@@ -55,7 +55,7 @@ if path_is_file(timing_path) {
     }
 }
 
-artifact_names := ["graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "analysis.json", "metadata.json", "report.md", "vector-cache.jsonl", "manifest.json"]
+artifact_names := ["graph.json", "nodes.jsonl", "edges.jsonl", "clusters.json", "overlaps.json", "orphan-candidates.json", "link-opportunities.json", "analysis.json", "metadata.json", "report.md", "vector-cache.jsonl", "adapter-cache.jsonl", "manifest.json"]
 output_bytes := 0
 for name in artifact_names { output_bytes = output_bytes + file_size(out + "/" + name) }
 build_result := parse_json(result.stdout)

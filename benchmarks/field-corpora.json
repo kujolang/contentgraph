@@ -1,0 +1,55 @@
+{
+  "schema": "contentgraph.field-corpora/v1",
+  "hardware": {
+    "machine": "MacBook Pro (MacBookPro16,1)",
+    "cpu": "6-Core Intel Core i7 2.6 GHz",
+    "logical_cpus": 12,
+    "memory_bytes": 17179869184,
+    "operating_system": "macOS 26.3.1",
+    "filesystem": "local APFS"
+  },
+  "settings": {
+    "max_term_document_frequency_ratio": 0.0,
+    "max_candidate_pairs": 2000000,
+    "deterministic": true,
+    "repeats": 3
+  },
+  "regression_thresholds": {
+    "max_median_seconds_per_5000_pages": 600,
+    "max_peak_rss_bytes": 1073741824,
+    "max_seconds_variance": 10000,
+    "failure_policy": "Any exceeded threshold blocks release qualification pending documented investigation."
+  },
+  "corpora": [
+    {
+      "name": "mdn-web-api-5000",
+      "path_env": "CONTENTGRAPH_FIELD_MDN_API",
+      "source_url": "https://github.com/mdn/content",
+      "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc",
+      "license": "CC-BY-SA-2.5 prose; code examples separately licensed per upstream LICENSE.md",
+      "consent_basis": "The upstream public license grants reproduction and analysis rights with attribution.",
+      "redaction": "Public repository files only; .git/private overlays excluded; URL/email-like strings replaced locally; each page capped at a 512-character real excerpt; persisted result contains aggregate measurements, source commit, and shape only.",
+      "sample_strategy": "First 5,000 accepted files under files/en-us/web/api in byte-sorted relative-path order, each below 5 MiB."
+    },
+    {
+      "name": "mdn-non-api-5000",
+      "path_env": "CONTENTGRAPH_FIELD_MDN_NON_API",
+      "source_url": "https://github.com/mdn/content",
+      "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc",
+      "license": "CC-BY-SA-2.5 prose; code examples separately licensed per upstream LICENSE.md",
+      "consent_basis": "The upstream public license grants reproduction and analysis rights with attribution.",
+      "redaction": "Public repository files only; Web API subtree, .git, and private overlays excluded; URL/email-like strings replaced locally; each page capped at a 512-character real excerpt; persisted result is aggregate-only.",
+      "sample_strategy": "First 5,000 accepted non-Web-API files under files/en-us in byte-sorted relative-path order, each below 5 MiB."
+    },
+    {
+      "name": "mdn-mixed-5000",
+      "path_env": "CONTENTGRAPH_FIELD_MDN_MIXED",
+      "source_url": "https://github.com/mdn/content",
+      "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc",
+      "license": "CC-BY-SA-2.5 prose; code examples separately licensed per upstream LICENSE.md",
+      "consent_basis": "The upstream public license grants reproduction and analysis rights with attribution.",
+      "redaction": "Public repository files only; .git/private overlays excluded; URL/email-like strings replaced locally; each page capped at a 512-character real excerpt; persisted result is aggregate-only.",
+      "sample_strategy": "2,500 files from each pinned API/non-API sorted sample, merged in byte-sorted relative-path order."
+    }
+  ]
+}

@@ -20,7 +20,7 @@ func collect_files(directory) {
     return result
 }
 files:=["VERSION","LICENSE","README.md","CHANGELOG.md","kujo.toml","contentgraph","contentgraph.cmd","contentgraph-benchmark","contentgraph.example.toml"]
-for directory in ["src","schemas","scripts","docs","examples","fixtures","tests"] { files=concat(files,collect_files(directory)) }
+for directory in ["src","schemas","scripts","docs","examples","fixtures","demo","benchmarks","tests"] { files=concat(files,collect_files(directory)) }
 components:=[]
 for path in files { components=push(components,{"type":"file","name":path,"hashes":[{"alg":"SHA-256","content":sha256_file(path)}]}) }
 components=push(components,{"type":"framework","name":"kujo","version":"1.0.1","purl":"pkg:github/kujolang/kujo@v1.0.1","licenses":[{"license":{"id":"MIT"}}]})
@@ -47,7 +47,7 @@ copy_file(sbom_path,path_join(bundle,basename(sbom_path)))
 copy_file(provenance_path,path_join(bundle,basename(provenance_path)))
 spawn_process(["touch","-t","197001010000",path_join(bundle,basename(sbom_path))],{"timeout_ms":5000,"max_output_bytes":4096})
 spawn_process(["touch","-t","197001010000",path_join(bundle,basename(provenance_path))],{"timeout_ms":5000,"max_output_bytes":4096})
-stage_directories:=["src","schemas","scripts","docs","examples","fixtures/golden/run","fixtures/golden","fixtures/adapters","fixtures/source","fixtures","tests",""]
+stage_directories:=["src","schemas","scripts","docs","examples","fixtures/golden/run","fixtures/golden","fixtures/adapters/siteprobe","fixtures/adapters","fixtures/source","fixtures","demo","benchmarks","tests",""]
 for directory in stage_directories { spawn_process(["touch","-t","197001010000",path_join(bundle,directory)],{"timeout_ms":5000,"max_output_bytes":4096}) }
 archive_result:=spawn_process(["tar","-cf",tar_path,"--sort=name","--mtime=1970-01-01T00:00:00Z","--owner=0","--group=0","--numeric-owner","-C",stage,bundle_name],{"timeout_ms":120000,"max_output_bytes":65536})
 if archive_result.exitcode!=0 {

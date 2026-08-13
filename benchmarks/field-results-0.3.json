@@ -1,0 +1,170 @@
+{
+  "classification": "field-public-consented-redacted",
+  "contentgraph_version": "0.3.0",
+  "engine": "kujo",
+  "hardware": {
+    "cpu": "6-Core Intel Core i7 2.6 GHz",
+    "filesystem": "local APFS",
+    "logical_cpus": 12,
+    "machine": "MacBook Pro (MacBookPro16,1)",
+    "memory_bytes": 17179869184,
+    "operating_system": "macOS 26.3.1"
+  },
+  "profiles": [
+    {
+      "candidate_pairs": {
+        "median": 0,
+        "samples": [
+          0,
+          0,
+          0
+        ]
+      },
+      "consent_basis": "The upstream public license grants reproduction and analysis rights with attribution.",
+      "license": "CC-BY-SA-2.5 prose; code examples separately licensed per upstream LICENSE.md",
+      "name": "mdn-web-api-5000",
+      "output_bytes": {
+        "median": 8851935,
+        "samples": [
+          8851935,
+          8851935,
+          8851935
+        ]
+      },
+      "peak_rss_bytes": {
+        "median": 513957888,
+        "samples": [
+          513957888,
+          516231168,
+          512847872
+        ],
+        "variance": 1982958811363.5554
+      },
+      "redaction": "Public repository files only; .git/private overlays excluded; URL/email-like strings replaced locally; each page capped at a 512-character real excerpt; persisted result contains aggregate measurements, source commit, and shape only.",
+      "repeats": 3,
+      "seconds": {
+        "median": 326.4773524590001,
+        "samples": [
+          346.522939392,
+          194.51340439799992,
+          326.4773524590001
+        ],
+        "variance": 4547.023096936327
+      },
+      "shape": {
+        "accepted_pages": 5000,
+        "sample_strategy": "First 5,000 accepted files under files/en-us/web/api in byte-sorted relative-path order, each below 5 MiB."
+      },
+      "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc",
+      "source_url": "https://github.com/mdn/content"
+    },
+    {
+      "candidate_pairs": {
+        "median": 0,
+        "samples": [
+          0,
+          0,
+          0
+        ]
+      },
+      "consent_basis": "The upstream public license grants reproduction and analysis rights with attribution.",
+      "license": "CC-BY-SA-2.5 prose; code examples separately licensed per upstream LICENSE.md",
+      "name": "mdn-non-api-5000",
+      "output_bytes": {
+        "median": 8964590,
+        "samples": [
+          8964590,
+          8964590,
+          8964590
+        ]
+      },
+      "peak_rss_bytes": {
+        "median": 523575296,
+        "samples": [
+          497446912,
+          523575296,
+          525070336
+        ],
+        "variance": 160886794281870.22
+      },
+      "redaction": "Public repository files only; Web API subtree, .git, and private overlays excluded; URL/email-like strings replaced locally; each page capped at a 512-character real excerpt; persisted result is aggregate-only.",
+      "repeats": 3,
+      "seconds": {
+        "median": 507.40446546200013,
+        "samples": [
+          507.40446546200013,
+          571.9374439660002,
+          430.7729365020001
+        ],
+        "variance": 3329.3683014331978
+      },
+      "shape": {
+        "accepted_pages": 5000,
+        "sample_strategy": "First 5,000 accepted non-Web-API files under files/en-us in byte-sorted relative-path order, each below 5 MiB."
+      },
+      "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc",
+      "source_url": "https://github.com/mdn/content"
+    },
+    {
+      "candidate_pairs": {
+        "median": 0,
+        "samples": [
+          0,
+          0,
+          0
+        ]
+      },
+      "consent_basis": "The upstream public license grants reproduction and analysis rights with attribution.",
+      "license": "CC-BY-SA-2.5 prose; code examples separately licensed per upstream LICENSE.md",
+      "name": "mdn-mixed-5000",
+      "output_bytes": {
+        "median": 8893471,
+        "samples": [
+          8893471,
+          8893471,
+          8893471
+        ]
+      },
+      "peak_rss_bytes": {
+        "median": 519778304,
+        "samples": [
+          519778304,
+          477036544,
+          521965568
+        ],
+        "variance": 427806596588430.25
+      },
+      "redaction": "Public repository files only; .git/private overlays excluded; URL/email-like strings replaced locally; each page capped at a 512-character real excerpt; persisted result is aggregate-only.",
+      "repeats": 3,
+      "seconds": {
+        "median": 424.36368274900036,
+        "samples": [
+          478.90162139700027,
+          424.36368274900036,
+          265.93306548100014
+        ],
+        "variance": 8158.9170054265605
+      },
+      "shape": {
+        "accepted_pages": 5000,
+        "sample_strategy": "2,500 files from each pinned API/non-API sorted sample, merged in byte-sorted relative-path order."
+      },
+      "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc",
+      "source_url": "https://github.com/mdn/content"
+    }
+  ],
+  "regression_thresholds": {
+    "failure_policy": "Any exceeded threshold blocks release qualification pending documented investigation.",
+    "max_median_seconds_per_5000_pages": 600,
+    "max_peak_rss_bytes": 1073741824,
+    "max_seconds_variance": 10000
+  },
+  "schema": "contentgraph.field-benchmark/v1",
+  "settings": {
+    "deterministic": true,
+    "max_candidate_pairs": 2000000,
+    "max_term_document_frequency_ratio": 0.0,
+    "repeats": 3
+  },
+  "synthetic_results_included": false
+}

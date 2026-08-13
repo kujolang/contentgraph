@@ -1,0 +1,41 @@
+# Build checksum-bound ContentGraph launch bundles around verified Kujo 1.0.1 binaries.
+version:=trim(read_file("VERSION"));runtime_root:="";argv:=args();i:=0
+loop{if i>=len(argv){break};if argv[i]=="--runtime-root"&&i+1<len(argv){runtime_root=argv[i+1];i=i+2}else{eprint("usage: package-platforms.kujo --runtime-root DIR");exit(1)}}
+if runtime_root==""{eprint("ContentGraph platform packaging: --runtime-root is required");exit(1)}
+dist:="dist";create_dir(dist)
+
+func collect_files(directory){result:=[];for name in sort(list_dir(directory)){if name=="__pycache__"||name==".DS_Store"{continue};path:=path_join(directory,name);if path_is_file(path){result=push(result,path)}else if path_is_dir(path){result=concat(result,collect_files(path))}};return result}
+files:=["VERSION","LICENSE","README.md","CHANGELOG.md","kujo.toml","contentgraph.example.toml"]
+for directory in ["src","schemas","docs","examples","fixtures","demo","benchmarks"]{files=concat(files,collect_files(directory))}
+platforms:=[{"id":"linux-x64","runtime":"kujo","archive":"tar.gz"},{"id":"macos-arm64","runtime":"kujo","archive":"tar.gz"},{"id":"macos-x64","runtime":"kujo","archive":"tar.gz"},{"id":"windows-x64","runtime":"kujo.exe","archive":"zip"}]
+subjects:=[];hashes:={}
+for platform in platforms {
+    runtime:=path_join(path_join(runtime_root,platform["id"]),platform["runtime"])
+    if !path_is_file(runtime){eprint("ContentGraph platform packaging: missing verified runtime: "+runtime);exit(1)}
+    stage:=path_join("/tmp","contentgraph-platform-"+uuid_v4());bundle_name:="contentgraph-"+version+"-"+platform["id"];bundle:=path_join(stage,bundle_name);create_dir(path_join(bundle,"bin"))
+    for path in files{destination:=path_join(bundle,path);create_dir(dirname(destination));copy_file(path,destination)}
+    copy_file(runtime,path_join(bundle,"bin/"+platform["runtime"]))
+    if platform["id"]=="windows-x64"{write_file(path_join(bundle,"contentgraph.cmd"),"@echo off\r\nsetlocal\r\nset ROOT=%~dp0\r\n\"%ROOT%bin\\kujo.exe\" run --untrusted --allow-fs-read --allow-fs-write --allow-fs-delete --allow-process-exec --allow-env-read --allow-clock --allow-random \"%ROOT%src\\main.kujo\" -- %*\r\n")}else{write_file(path_join(bundle,"contentgraph"),"#!/usr/bin/env sh\nset -eu\nROOT=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$ROOT/bin/kujo\" run --untrusted --allow-fs-read --allow-fs-write --allow-fs-delete --allow-process-exec --allow-env-read --allow-clock --allow-random \"$ROOT/src/main.kujo\" -- \"$@\"\n");spawn_process(["chmod","755",path_join(bundle,"contentgraph"),path_join(bundle,"bin/kujo")],{"timeout_ms":5000,"max_output_bytes":4096})}
+    for path in collect_files(bundle){spawn_process(["touch","-t","197001010000",path],{"timeout_ms":5000,"max_output_bytes":4096})}
+    archive:="";result:=null
+    if platform["archive"]=="zip"{
+        archive=path_join(os_getcwd(),path_join(dist,bundle_name+".zip"));if path_exists(archive){delete_file(archive)};result=spawn_process(["zip","-X","-q","-r",archive,bundle_name],{"cwd":stage,"timeout_ms":120000,"max_output_bytes":65536})
+    }else{
+        archive=path_join(dist,bundle_name+".tar.gz");tar_path:=path_join(dist,bundle_name+".tar");if path_exists(archive){delete_file(archive)};result=spawn_process(["tar","-cf",tar_path,"--sort=name","--mtime=1970-01-01T00:00:00Z","--owner=0","--group=0","--numeric-owner","-C",stage,bundle_name],{"timeout_ms":120000,"max_output_bytes":65536});if result.exitcode!=0{result=spawn_process(["tar","-cf",tar_path,"--format","ustar","--no-xattrs","-C",stage,bundle_name],{"timeout_ms":120000,"max_output_bytes":65536})};if result.exitcode==0{result=spawn_process(["gzip","-n","-f",tar_path],{"timeout_ms":120000,"max_output_bytes":65536})}
+    }
+    if result.exitcode!=0{eprint("ContentGraph platform packaging failed for "+platform["id"]+" (exit "+to_string(result.exitcode)+"): "+result.stderr);exit(1)}
+    digest:=sha256_file(archive);hashes[platform["id"]]=digest;subjects=push(subjects,{"name":basename(archive),"digest":{"sha256":digest}})
+    cleanup:=spawn_process(["find",stage,"-depth","-delete"],{"timeout_ms":30000,"max_output_bytes":4096});if cleanup.exitcode!=0{eprint("ContentGraph platform cleanup failed");exit(1)}
+}
+base_url:="https://github.com/kujolang/contentgraph/releases/download/v"+version+"/"
+formula:="class Contentgraph < Formula\n  desc \"Deterministic, offline content relationship graph built with Kujo\"\n  homepage \"https://github.com/kujolang/contentgraph\"\n  version \""+version+"\"\n  license \"MIT\"\n  on_macos do\n    if Hardware::CPU.arm?\n      url \""+base_url+"contentgraph-"+version+"-macos-arm64.tar.gz\"\n      sha256 \""+hashes["macos-arm64"]+"\"\n    else\n      url \""+base_url+"contentgraph-"+version+"-macos-x64.tar.gz\"\n      sha256 \""+hashes["macos-x64"]+"\"\n    end\n  end\n  on_linux do\n    url \""+base_url+"contentgraph-"+version+"-linux-x64.tar.gz\"\n    sha256 \""+hashes["linux-x64"]+"\"\n  end\n  def install\n    libexec.install Dir[\"*\"]\n    bin.install_symlink libexec/\"contentgraph\"\n  end\n  test do\n    assert_match \"contentgraph\", shell_output(\"#{bin}/contentgraph version\")\n  end\nend\n"
+write_file(path_join(dist,"contentgraph.rb"),formula,true)
+scoop:={"version":version,"description":"Deterministic, offline content relationship graph built with Kujo","homepage":"https://github.com/kujolang/contentgraph","license":"MIT","architecture":{"64bit":{"url":base_url+"contentgraph-"+version+"-windows-x64.zip","hash":hashes["windows-x64"],"extract_dir":"contentgraph-"+version+"-windows-x64"}},"bin":"contentgraph.cmd","checkver":{"github":"https://github.com/kujolang/contentgraph"},"autoupdate":{"architecture":{"64bit":{"url":"https://github.com/kujolang/contentgraph/releases/download/v$version/contentgraph-$version-windows-x64.zip","extract_dir":"contentgraph-$version-windows-x64"}}}}
+write_file(path_join(dist,"contentgraph.scoop.json"),to_json_pretty(scoop)+"\n",true)
+commit:=trim(spawn_process(["git","rev-parse","HEAD"],{"timeout_ms":5000,"max_output_bytes":4096}).stdout)
+provenance:={"_type":"https://in-toto.io/Statement/v1","subject":subjects,"predicateType":"https://slsa.dev/provenance/v1","predicate":{"buildDefinition":{"buildType":"https://github.com/kujolang/contentgraph/platform-release/v1","externalParameters":{"version":version,"kujo_version":"1.0.1"}},"runDetails":{"builder":{"id":"https://github.com/kujolang/contentgraph/actions/workflows/release.yml"},"metadata":{"source_commit":commit}}}}
+write_file(path_join(dist,"contentgraph-"+version+".platform-provenance.json"),to_json_pretty(provenance)+"\n",true)
+checksums_path:=path_join(dist,"SHA256SUMS");base_checksums:="";if path_is_file(checksums_path){for line in read_lines(checksums_path){if contains(line,"-linux-x64.tar.gz")==0&&contains(line,"-macos-arm64.tar.gz")==0&&contains(line,"-macos-x64.tar.gz")==0&&contains(line,"-windows-x64.zip")==0&&!ends_with(line,"  contentgraph.rb")&&!ends_with(line,"  contentgraph.scoop.json")&&contains(line,".platform-provenance.json")==0{base_checksums=base_checksums+line+"\n"}}}
+checksums:="";for subject in subjects{checksums=checksums+subject["digest"]["sha256"]+"  "+subject["name"]+"\n"};checksums=checksums+sha256_file(path_join(dist,"contentgraph.rb"))+"  contentgraph.rb\n"+sha256_file(path_join(dist,"contentgraph.scoop.json"))+"  contentgraph.scoop.json\n"+sha256_file(path_join(dist,"contentgraph-"+version+".platform-provenance.json"))+"  contentgraph-"+version+".platform-provenance.json\n"
+write_file(checksums_path,base_checksums+checksums,true)
+print(to_json({"schema":"contentgraph.platform-bundles/v1","version":version,"bundles":subjects,"homebrew":"dist/contentgraph.rb","scoop":"dist/contentgraph.scoop.json"}))

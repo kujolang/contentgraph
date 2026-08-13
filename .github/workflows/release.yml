@@ -30,11 +30,38 @@ jobs:
         env:
           KUJO_BIN: ${{ github.workspace }}/kujo-runtime/target/release/kujo
         run: $KUJO_BIN run scripts/package-release.kujo
-      - name: Attest release archive, SBOM, provenance, and checksums
+      - name: Fetch and verify Kujo platform runtimes
+        run: |
+          mkdir -p /tmp/contentgraph-runtimes
+          gh release download v1.0.1 --repo kujolang/kujo --dir /tmp/kujo-assets
+          (cd /tmp/kujo-assets && sha256sum --check checksums.txt)
+          for platform in linux-x64 macos-arm64 macos-x64; do
+            mkdir -p "/tmp/contentgraph-runtimes/$platform"
+            tar -xzf "/tmp/kujo-assets/kujo-v1.0.1-$platform.tar.gz" -C "/tmp/contentgraph-runtimes/$platform"
+            found=$(find "/tmp/contentgraph-runtimes/$platform" -type f -name kujo -print -quit)
+            target="/tmp/contentgraph-runtimes/$platform/kujo"
+            if [ "$found" != "$target" ]; then cp "$found" "$target"; fi
+          done
+          mkdir -p /tmp/contentgraph-runtimes/windows-x64
+          unzip -q /tmp/kujo-assets/kujo-v1.0.1-windows-x64.zip -d /tmp/contentgraph-runtimes/windows-x64/unpacked
+          found=$(find /tmp/contentgraph-runtimes/windows-x64/unpacked -type f -name kujo.exe -print -quit)
+          cp "$found" /tmp/contentgraph-runtimes/windows-x64/kujo.exe
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Package platform launch bundles and manifests
+        env:
+          KUJO_BIN: ${{ github.workspace }}/kujo-runtime/target/release/kujo
+        run: $KUJO_BIN run scripts/package-platforms.kujo -- --runtime-root /tmp/contentgraph-runtimes
+      - name: Verify release checksums
+        run: (cd dist && sha256sum --check SHA256SUMS)
+      - name: Attest release archives, manifests, SBOM, provenance, and checksums
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             dist/contentgraph-*.tar.gz
+            dist/contentgraph-*.zip
+            dist/contentgraph.rb
+            dist/contentgraph.scoop.json
             dist/contentgraph-*.cdx.json
             dist/contentgraph-*.provenance.json
             dist/SHA256SUMS
