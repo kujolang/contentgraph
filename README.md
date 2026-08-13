@@ -117,9 +117,9 @@ Errors are concise, written to stderr, and do not include Python tracebacks.
 The sparse streaming/top-k scorer holds candidate scores for one source node at
 a time and skips pairs with no retained shared term. Candidate pairs can still
 grow quadratically for uniformly dense corpora, so the explicit pair ceiling
-and document-frequency filter prevent accidental resource exhaustion. Artifacts are rendered
-and budget-checked before a temporary directory is atomically promoted; a
-failed budget check does not leave a partial run.
+and document-frequency filter prevent accidental resource exhaustion. Artifacts
+are streamed into a private staging directory, validated and budget-checked,
+then atomically promoted; a failed gate does not leave a partial run.
 
 ## Artifacts and contracts
 

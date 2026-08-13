@@ -3,7 +3,7 @@
 | Requirement | Evidence |
 | --- | --- |
 | Consented real field campaign | `scripts/prepare-field-corpora.kujo`, `scripts/field-benchmark.kujo`, pinned/redacted manifest, three 5,000-page result profiles with medians, variances, RSS, shape, hardware, and thresholds. |
-| Streaming publication | Direct incremental JSON/JSONL staging writes, bounded schema validation, output budgets, SHA-256 manifest, cleanup on failure, atomic rename, unchanged public golden bytes. |
+| Streaming publication | Direct incremental JSON/JSONL staging writes, bounded schema validation, output budgets, SHA-256 manifest, cleanup on failure, atomic rename, unchanged public golden bytes, and a three-run pinned field comparison showing median peak RSS falls 13.86% (596,676,608 to 513,957,888 bytes). |
 | Adapter cache | Independently fingerprinted SiteProbe, sitemap, CSV, and CMS parsed results; integrity validation; hit/miss diagnostics; cold/partial-warm benchmark. |
 | Vendor mappings | Offline stable-contract WordPress, Contentful, Sanity, Drupal, and generic SQL examples; all five pass native tests without network. |
 | Explainability | `explain` traces cluster, overlap, bridge, or link evidence with 1–100 result and per-string bounds, runtime schema validation, deterministic tests, and no mutation authority. |

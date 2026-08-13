@@ -36,12 +36,18 @@ to a private staging directory before hash, output-budget, manifest, and rename
 gates. Public graph, node, edge, cluster, overlap, orphan, link-opportunity,
 analysis, and report golden bytes remain equal to 0.2.1.
 
-The field median peak RSS is 513.96–523.58 MB, below the 1 GiB gate. The
-synthetic 5,000-node before/after shape remains memory-neutral because 0.3 adds a
-parsed CSV cache and grows output from 5.82 MB to 9.08 MB; the record does not
-misrepresent this as a streaming win. Partial adapter reuse reports three hits
-and one miss after one changed adapter; fixture cold/warm medians are 0.194 and
-0.195 seconds, where tiny inputs make parsing savings smaller than process noise.
+The like-for-like MDN Web API comparison records three cold 0.2.1 runs and the
+three cold 0.3.0 field runs under identical corpus and scoring settings. Median
+peak RSS falls from 596,676,608 to 513,957,888 bytes, a 13.86% reduction that
+passes the explicit 5% material-improvement gate. The Kujo comparison receipt is
+`benchmarks/streaming-memory-field-0.3.json`.
+
+The synthetic 5,000-node before/after shape remains memory-neutral because 0.3
+adds a parsed CSV cache and grows output from 5.82 MB to 9.08 MB; the record does
+not misrepresent this synthetic shape as a streaming win. Partial adapter reuse
+reports three hits and one miss after one changed adapter; fixture cold/warm
+medians are 0.194 and 0.195 seconds, where tiny inputs make parsing savings
+smaller than process noise.
 
 ## Local release gates
 

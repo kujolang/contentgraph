@@ -8,6 +8,9 @@ Synthetic capacity results and field results are intentionally separate:
   redaction policy, hardware, settings, and regression thresholds.
 - `field-results-0.3.json` contains repeated field measurements only; it never
   contains source text, URLs from pages, or queries.
+- `streaming-memory-field-0.3.json` compares the 0.2.1 and 0.3.0 publishers on
+  the same pinned, redacted MDN Web API sample and enforces a 5% median peak-RSS
+  reduction gate.
 
 Reproduce field results after preparing the exact manifest commits and exported
 environment paths:
@@ -21,6 +24,19 @@ kujo run scripts/field-benchmark.kujo -- \
   --manifest benchmarks/field-corpora.json \
   --out benchmarks/field-results-0.3.json \
   --repeats 3
+
+# Compare 0.2.1 to the recorded 0.3 field profile. The first invocation runs
+# the pinned 0.2.1 launcher three times; later checks can reuse that receipt.
+kujo run scripts/streaming-memory-comparison.kujo -- \
+  --baseline-launcher /path/to/contentgraph-0.2.1/contentgraph \
+  --corpus "$CONTENTGRAPH_FIELD_MDN_API" \
+  --field-results benchmarks/field-results-0.3.json \
+  --out benchmarks/streaming-memory-field-0.3.json \
+  --repeats 3
+kujo run scripts/streaming-memory-comparison.kujo -- \
+  --baseline-results benchmarks/streaming-memory-field-0.3.json \
+  --field-results benchmarks/field-results-0.3.json \
+  --out benchmarks/streaming-memory-field-0.3.json
 ```
 
 Acquisition may require network access; ContentGraph execution remains offline.

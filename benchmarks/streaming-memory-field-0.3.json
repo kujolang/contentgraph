@@ -1,0 +1,96 @@
+{
+  "baseline_0_2_1": {
+    "candidate_pairs": {
+      "median": 0,
+      "samples": [
+        0,
+        0,
+        0
+      ]
+    },
+    "output_bytes": {
+      "median": 8645286,
+      "samples": [
+        8645286,
+        8645286,
+        8645286
+      ]
+    },
+    "peak_rss_bytes": {
+      "median": 596676608,
+      "samples": [
+        521584640,
+        596676608,
+        597487616
+      ]
+    },
+    "repeats": 3,
+    "seconds": {
+      "median": 885.0794451639997,
+      "samples": [
+        985.770502275,
+        862.209500526,
+        885.0794451639997
+      ]
+    }
+  },
+  "candidate_0_3_0": {
+    "candidate_pairs": {
+      "median": 0,
+      "samples": [
+        0,
+        0,
+        0
+      ]
+    },
+    "output_bytes": {
+      "median": 8851935,
+      "samples": [
+        8851935,
+        8851935,
+        8851935
+      ]
+    },
+    "peak_rss_bytes": {
+      "median": 513957888,
+      "samples": [
+        513957888,
+        516231168,
+        512847872
+      ],
+      "variance": 1982958811363.5552
+    },
+    "repeats": 3,
+    "seconds": {
+      "median": 326.4773524590001,
+      "samples": [
+        346.522939392,
+        194.51340439799992,
+        326.4773524590001
+      ],
+      "variance": 4547.023096936327
+    },
+    "source": "benchmarks/field-results-0.3.json#mdn-web-api-5000"
+  },
+  "classification": "field-public-consented-redacted",
+  "corpus": "mdn-web-api-5000",
+  "hardware": {
+    "cpu": "6-Core Intel Core i7 2.6 GHz",
+    "filesystem": "local APFS",
+    "logical_cpus": 12,
+    "machine": "MacBook Pro (MacBookPro16,1)",
+    "memory_bytes": 17179869184,
+    "operating_system": "macOS 26.3.1"
+  },
+  "material_reduction_passed": true,
+  "material_reduction_threshold_percent": 5.0,
+  "peak_rss_reduction_percent": 13.863241643955984,
+  "schema": "contentgraph.streaming-memory-comparison/v1",
+  "settings": {
+    "deterministic": true,
+    "max_candidate_pairs": 2000000,
+    "max_term_document_frequency_ratio": 0.0,
+    "repeats": 3
+  },
+  "source_commit": "8a10694edf44bde124fa8f18af65651855f632dc"
+}
