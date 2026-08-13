@@ -6,6 +6,11 @@
 | macOS arm64/x86_64 | Supported | GitHub Actions native validation, launcher, UTF-8 paths, GraphML |
 | Windows x86_64 | Supported | GitHub Actions via Git Bash plus direct `.cmd` launcher validation, `.exe` runtime discovery, UTF-8 paths, GraphML |
 
-ContentGraph 0.2 is qualified against Kujo 1.0.1 and supports Kujo 1.x. Python is not required. Filesystem
+ContentGraph 0.3 is qualified against Kujo 1.0.1 and supports Kujo 1.x. Python is not required. Filesystem
 inputs must be UTF-8 or are read lossily by the source adapter; JSON contracts
 remain strict UTF-8. Network access is never required at runtime.
+
+Tagged releases publish `linux-x64`, `macos-arm64`, `macos-x64`, and
+`windows-x64` launch bundles containing the matching checksum-verified official
+Kujo runtime, plus Homebrew and Scoop manifests. Every bundle and manifest is
+covered by `SHA256SUMS`, platform provenance, and GitHub attestation.

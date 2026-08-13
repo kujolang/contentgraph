@@ -1,16 +1,13 @@
-# Public demonstration
+# Interactive static demo
 
-The repository ships a non-private three-page corpus in `fixtures/source` and a
-checked-in expected run in `fixtures/golden/run`.
+Regenerate the deterministic, offline demonstration directly with Kujo:
 
 ```bash
-./contentgraph build --source fixtures/source \
-  --out .contentgraph/demo --overlap-threshold 0.25 --deterministic
-./contentgraph analysis .contentgraph/demo
-./contentgraph link-opportunities .contentgraph/demo
+kujo run scripts/build-demo.kujo
 ```
 
-The expected report shows three content nodes, one lexical edge, two clusters,
-three orphan/weak candidates, one overlap candidate, and two directional link
-opportunities. The validation suite compares every emitted artifact byte for
-byte against the checked-in run.
+Open `demo/index.html` locally. Its accessible filter is self-contained and its
+Content Security Policy denies network access. Every displayed node, count, and
+term links to the committed public-corpus artifact that supports it, plus the
+Kujo generator or engine source. Byte-golden artifacts are verified on every
+supported platform.

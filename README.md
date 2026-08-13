@@ -1,6 +1,6 @@
 # ContentGraph
 
-[![Version](https://img.shields.io/badge/version-0.2.1-black)](VERSION)
+[![Version](https://img.shields.io/badge/version-0.3.0-black)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
@@ -39,7 +39,9 @@ release packager are implemented directly in Kujo under `src/` and `scripts/`.
 ./contentgraph orphans .contentgraph/baseline
 ./contentgraph related .contentgraph/baseline --node guides/getting-started.md
 ./contentgraph link-opportunities .contentgraph/baseline
+./contentgraph explain .contentgraph/baseline --type cluster --id cluster-001 --limit 10
 ./contentgraph export .contentgraph/baseline --format graphml --out graph.graphml
+./contentgraph export .contentgraph/baseline --format sarif --limit 500 --out contentgraph.sarif
 ```
 
 Inputs can be repeated and combined:
@@ -68,8 +70,10 @@ input content. Local-file node IDs derive from portable relative paths; URL
 nodes derive from canonical URLs.
 
 Adapter contract names are recorded in `metadata.json`. Incremental builds use
-`--incremental-from RUN`; the cache fingerprint covers scoring settings plus
-the path, byte count, and SHA-256 digest of every input dependency.
+`--incremental-from RUN`; the cache fingerprint covers scoring and tokenizer
+settings plus the path, byte count, and SHA-256 digest of every input
+dependency. SiteProbe, sitemap, CSV, and CMS adapters independently reuse parsed
+results when only part of a combined input set changes.
 
 ## Commands
 
@@ -84,8 +88,9 @@ the path, byte count, and SHA-256 digest of every input dependency.
 | `overlaps` | Show high-overlap candidates requiring intent review. |
 | `link-opportunities` | Show missing directed-link candidates requiring context review. |
 | `analysis` | Show components, centrality, bridge pages, hubs/authorities, depth drift, and cluster health. |
+| `explain` | Trace a cluster, overlap, bridge, or link recommendation to bounded measured evidence. |
 | `compare` | Compare nodes, fingerprints, clusters, links, and edge weights. |
-| `export` | Export graph JSON or standards-compliant GraphML. Existing files require `--force`. |
+| `export` | Export graph JSON, standards-compliant GraphML, or bounded SARIF 2.1.0. Existing files require `--force`. |
 | `version` | Print version and schema/method contracts. |
 
 Commands return `0` on success and `1` for invalid input, a rejected resource
@@ -106,6 +111,8 @@ Errors are concise, written to stderr, and do not include Python tracebacks.
 | `--max-analysis-items` | 1,000 | Maximum detailed component, cluster-health, and drift entries (totals remain in `analysis.summary`). |
 | `--max-output-bytes` | 256 MiB | Complete artifact-set ceiling. |
 | `--max-report-tokens` | 2,000 | Declared human-report budget. |
+| `--tokenizer-profile` | `deterministic-lexical/v1` | Versioned tokenizer; `unicode-lexical/v1` supports mixed scripts. |
+| `--telemetry` | off | Write local timing/resource counters; incompatible with deterministic mode. |
 
 The sparse streaming/top-k scorer holds candidate scores for one source node at
 a time and skips pairs with no retained shared term. Candidate pairs can still
@@ -118,9 +125,11 @@ failed budget check does not leave a partial run.
 
 Each run contains `graph.json`, `nodes.jsonl`, `edges.jsonl`, `clusters.json`,
 `overlaps.json`, `orphan-candidates.json`, `link-opportunities.json`,
-`analysis.json`, `metadata.json`, `report.md`, `vector-cache.jsonl`, and
-`manifest.json`. The vector cache stores normalized terms (never source bodies)
-so changed builds can reuse unchanged tokenization. The manifest
+`analysis.json`, `metadata.json`, `report.md`, `vector-cache.jsonl`,
+`adapter-cache.jsonl`, and `manifest.json`; opted-in builds also contain
+`telemetry.json`. The vector cache stores normalized terms (never source bodies)
+so changed builds can reuse unchanged tokenization. Adapter cache entries contain
+normalized parsed corpus data. The manifest
 binds every other artifact to a SHA-256 digest. Metadata records configured budgets and actual
 input-byte, candidate-pair, and retained-pair usage. Relationships label their
 evidence method as `deterministic-lexical/v1`, `existing-internal-link`, or
@@ -143,22 +152,26 @@ evidence silently.
 ```bash
 bash scripts/validate.sh
 ./contentgraph-benchmark --nodes 1000
+kujo run scripts/build-demo.kujo
 ```
 
 Validation checks every Kujo module, runs native adversarial, property,
 differential, schema, incremental, adapter, GraphML, and byte-golden tests,
 validates JSON schema syntax, and checks patch whitespace. The benchmark corpus
-is generated and analyzed by Kujo. See [demo](docs/demo.md), [platform support](docs/platform-support.md),
-[upgrade/rollback](docs/upgrade-rollback.md), and [release qualification](docs/release-qualification-0.2.1.md).
+is generated and analyzed by Kujo. See the [interactive demo](demo/index.html),
+[demo guide](docs/demo.md), [platform support](docs/platform-support.md),
+[telemetry contract](docs/telemetry.md), [upgrade/rollback](docs/upgrade-rollback.md),
+and [release qualification](docs/release-qualification-0.3.0.md).
 [Contract compatibility](docs/compatibility.md) documents additive v1 evolution
-and legacy-run behavior. The [0.2 completion audit](docs/completion-audit-0.2.0.md)
-maps every hardening requirement to evidence; the [0.3 review](docs/next-session-review-0.3.md)
+and legacy-run behavior. The [0.3 completion audit](docs/completion-audit-0.3.0.md)
+maps every requirement to evidence; the [0.4 review](docs/next-session-review-0.4.md)
 contains the next additive opportunity list.
 
 ## Enterprise readiness
 
-ContentGraph 0.2 is a native-Kujo, offline, bounded, schema-validated reference
+ContentGraph 0.3 is a native-Kujo, offline, bounded, schema-validated reference
 implementation. Tagged releases are validated on Linux, macOS, and Windows,
-packaged with checksums, CycloneDX SBOM and SLSA-shaped provenance, and signed by
-GitHub artifact attestations. See the qualification record for exact performance
-envelopes and remaining operational assumptions.
+packaged as checksum-bound platform launch bundles containing the official Kujo
+runtime, with Homebrew and Scoop manifests, CycloneDX SBOM, SLSA-shaped
+provenance, and GitHub artifact attestations. Synthetic and consented
+public-corpus field performance are reported separately.

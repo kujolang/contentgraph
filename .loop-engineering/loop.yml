@@ -1,5 +1,5 @@
-objective: "Complete every item and exit criterion in docs/next-session-review.md for ContentGraph 0.2.0."
-checklist_file: "docs/next-session-review.md"
+objective: "Complete every item and exit criterion in docs/next-session-review-0.3.md for ContentGraph 0.3.0."
+checklist_file: "docs/next-session-review-0.3.md"
 max_iterations: 8
 max_no_progress: 2
 max_consecutive_failures: 3

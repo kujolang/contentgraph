@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 - 2026-08-12
+
+- Stream validated JSON/JSONL into atomic staging with lower large-run memory.
+- Add partial SiteProbe, sitemap, CSV, and CMS parse-cache reuse.
+- Add bounded explainability, deterministic SARIF, mixed-script tokenizer
+  profiles, privacy-restricted local telemetry, and five offline CMS mappings.
+- Add a Kujo-generated interactive demo, public-corpus field benchmarks, and
+  checksum-bound platform launch bundles with package-manager manifests.
+
 ## 0.2.1 - 2026-08-12
 
 - Propagate configured Kujo runtime paths through the complete validation suite.
