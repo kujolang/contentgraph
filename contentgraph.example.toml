@@ -14,4 +14,6 @@ max_candidate_pairs = 2000000
 max_related_per_node = 20
 max_term_document_frequency_ratio = 1.0
 max_analysis_items = 1000
+tokenizer_profile = "deterministic-lexical/v1"
+telemetry = false
 deterministic = true

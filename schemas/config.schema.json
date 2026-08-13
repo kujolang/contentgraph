@@ -30,6 +30,8 @@
         "max_related_per_node": {"type": "integer", "minimum": 1, "maximum": 1000},
         "max_term_document_frequency_ratio": {"type": "number", "minimum": 0, "maximum": 1},
         "max_analysis_items": {"type": "integer", "minimum": 1, "maximum": 20000},
+        "tokenizer_profile": {"enum": ["deterministic-lexical/v1", "unicode-lexical/v1"]},
+        "telemetry": {"type": "boolean"},
         "deterministic": {"type": "boolean"},
         "json": {"type": "boolean"}
       }

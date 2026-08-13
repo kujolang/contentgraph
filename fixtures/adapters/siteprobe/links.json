@@ -1,0 +1,1 @@
+{"links":[{"source":"https://example.com/a","target":"https://example.com/b","internal":true,"text":"Bridge"},{"source":"https://example.com/b","target":"https://example.com/c","internal":true,"text":"Finish"}]}

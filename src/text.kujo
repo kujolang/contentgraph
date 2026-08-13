@@ -63,15 +63,24 @@ func parse_frontmatter(text) {
     return {"meta":meta, "body":substring(text, end + 4, len(text))}
 }
 
-func tokens(text) {
+func tokenizer_pattern(profile) {
+    if profile == "deterministic-lexical/v1" { return "[a-z0-9][a-z0-9_-]{1,}" }
+    if profile == "unicode-lexical/v1" { return "[\\p{L}\\p{N}][\\p{L}\\p{N}_-]{1,}" }
+    eprint("ContentGraph: unsupported tokenizer profile: "+profile)
+    exit(1)
+}
+
+func tokens_with_profile(text, profile) {
     result := []
-    for token in regex_find_all(lower(text), "[a-z0-9][a-z0-9_-]{1,}") {
+    for token in regex_find_all(lower(text), tokenizer_pattern(profile)) {
         if !array_has(STOP_WORDS, token) && !regex_match(token, "^[0-9]+$") {
             result = push(result, token)
         }
     }
     return result
 }
+
+func tokens(text) { return tokens_with_profile(text,"deterministic-lexical/v1") }
 
 func title_from_text(path, meta, body) {
     if has_key(meta, "title") && meta["title"] != "" { return meta["title"] }
@@ -92,4 +101,6 @@ export fingerprint := fingerprint
 export strip_markup := strip_markup
 export parse_frontmatter := parse_frontmatter
 export tokens := tokens
+export tokens_with_profile := tokens_with_profile
+export tokenizer_pattern := tokenizer_pattern
 export title_from_text := title_from_text

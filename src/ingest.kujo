@@ -32,23 +32,27 @@ func consume_input(budget, path, per_file) {
 }
 
 func source_files(root, relative) {
-    results := []
     if path_is_file(root) {
         return [{"path":root, "relative":basename(root)}]
     }
-    names := sort(list_dir(root))
-    for name in names {
-        if list_has(EXCLUDED_DIRS, name) { continue }
-        path := path_join(root, name)
-        rel := name
-        if relative != "" { rel = relative + "/" + name }
-        if path_is_symlink(path) { continue }
-        if path_is_dir(path) {
-            results = concat(results, source_files(path, rel))
-        } else if path_is_file(path) && list_has(SOURCE_EXTENSIONS, lower(path_extension(path))) {
-            results = push(results, {"path":path, "relative":rel})
+    pending := [{"path":root,"relative":relative}]
+    discovered := {}
+    cursor:=0
+    loop {
+        if cursor>=len(pending){break}
+        directory:=pending[cursor];cursor=cursor+1
+        for name in sort(list_dir(directory["path"])) {
+            if list_has(EXCLUDED_DIRS, name) { continue }
+            path := path_join(directory["path"], name)
+            rel := name
+            if directory["relative"] != "" { rel = directory["relative"] + "/" + name }
+            if path_is_symlink(path) { continue }
+            if path_is_dir(path) { pending=push(pending,{"path":path,"relative":rel}) }
+            else if path_is_file(path) && list_has(SOURCE_EXTENSIONS, lower(path_extension(path))) { discovered[rel]=path }
         }
     }
+    names:=sort(keys(discovered));results:=range(0,len(names));index:=0
+    for name in names{results[index]={"path":discovered[name],"relative":name};index=index+1}
     return results
 }
 
@@ -251,6 +255,8 @@ func add_search_associations(paths, nodes, budget) {
 }
 
 export value_or := value_or
+export consume_input := consume_input
+export source_files := source_files
 export ingest_source := ingest_source
 export ingest_siteprobe := ingest_siteprobe
 export ingest_sitemap := ingest_sitemap

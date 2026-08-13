@@ -3,7 +3,7 @@
   "$id": "https://schemas.kujolang.ai/contentgraph/analysis.v1.json",
   "title": "ContentGraph analysis v1",
   "type": "object",
-  "required": ["schema", "summary", "components", "bridge_pages", "authorities", "hubs", "crawl_depth_drift", "cluster_health"],
+  "required": ["schema", "summary", "components", "bridge_pages", "authorities", "hubs", "crawl_depth_drift", "cluster_health", "method"],
   "properties": {
     "schema": {"const": "contentgraph.analysis/v1"},
     "summary": {"type": "object"},
@@ -12,6 +12,7 @@
     "authorities": {"type": "array"},
     "hubs": {"type": "array"},
     "crawl_depth_drift": {"type": "array"},
-    "cluster_health": {"type": "array"}
+    "cluster_health": {"type": "array"},
+    "method": {"const": "deterministic-graph-analysis/v1"}
   }
 }

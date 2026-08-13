@@ -1,6 +1,6 @@
 # Native end-to-end, property, differential, and adversarial ContentGraph suite.
 
-ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","manifest.json"]
+ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","adapter-cache.jsonl","manifest.json"]
 
 func check_equal(actual,expected) {
     if actual!=expected { eprint("check_equal failed: actual="+to_string(actual)+" expected="+to_string(expected)); exit(1) }
@@ -82,7 +82,7 @@ check_equal(analysis["summary"]["component_count"],len(analysis["components"]))
 
 # Backward compatibility: 0.1 graph runs did not contain analysis.json.
 legacy:=path_join(root,"legacy");create_dir(legacy)
-for name in ARTIFACTS { if name!="analysis.json" && name!="manifest.json" && name!="vector-cache.jsonl" { copy_file(path_join(first,name),path_join(legacy,name)) } }
+for name in ARTIFACTS { if name!="analysis.json" && name!="manifest.json" && name!="vector-cache.jsonl" && name!="adapter-cache.jsonl" { copy_file(path_join(first,name),path_join(legacy,name)) } }
 run_cli(["orphans",legacy],0)
 run_cli(["analysis",legacy],1)
 
@@ -98,10 +98,44 @@ run_cli(["build","--config",bad_config],1)
 
 # Adapters and GraphML query-node integrity.
 adapter_run:=path_join(root,"adapters")
-run_cli(["build","--sitemap","fixtures/adapters/sitemap.xml","--csv","fixtures/adapters/content.csv","--cms","fixtures/adapters/cms.json","--searchbridge","fixtures/adapters/searchbridge.json","--out",adapter_run,"--deterministic","--json"],0)
+run_cli(["build","--siteprobe","fixtures/adapters/siteprobe","--sitemap","fixtures/adapters/sitemap.xml","--csv","fixtures/adapters/content.csv","--cms","fixtures/adapters/cms.json","--searchbridge","fixtures/adapters/searchbridge.json","--out",adapter_run,"--overlap-threshold","0.1","--deterministic","--json"],0)
+adapter_metadata:=parse_json(read_file(path_join(adapter_run,"metadata.json")))
+check_equal(adapter_metadata["usage"]["adapter_cache_hits"],0);check_equal(adapter_metadata["usage"]["adapter_cache_misses"],4)
 graphml_result:=run_cli(["export",adapter_run,"--format","graphml"],0)
 graphml:=graphml_result.stdout
 check_true(contains(graphml,"search-query")>0); check_true(contains(graphml,"query:")>0); check_true(contains(graphml,"deterministic content graph")>0)
+
+# Per-adapter partial cache reuse (SiteProbe, sitemap, CSV, CMS).
+changed_csv:=path_join(root,"content-changed.csv")
+write_file(changed_csv,read_file("fixtures/adapters/content.csv")+"csv-three,Changed CSV,https://example.com/csv-changed,\"changed adapter content\",2026-08-12\n")
+adapter_warm:=path_join(root,"adapters-warm")
+run_cli(["build","--siteprobe","fixtures/adapters/siteprobe","--sitemap","fixtures/adapters/sitemap.xml","--csv",changed_csv,"--cms","fixtures/adapters/cms.json","--searchbridge","fixtures/adapters/searchbridge.json","--out",adapter_warm,"--incremental-from",adapter_run,"--overlap-threshold","0.1","--deterministic","--json"],0)
+warm_metadata:=parse_json(read_file(path_join(adapter_warm,"metadata.json")))
+check_equal(warm_metadata["usage"]["adapter_cache_hits"],3);check_equal(warm_metadata["usage"]["adapter_cache_misses"],1)
+tampered_cache:=path_join(root,"tampered-cache");create_dir(tampered_cache);for name in ARTIFACTS{copy_file(path_join(adapter_run,name),path_join(tampered_cache,name))};append_file(path_join(tampered_cache,"adapter-cache.jsonl"),"\n")
+run_cli(["build","--siteprobe","fixtures/adapters/siteprobe","--out",path_join(root,"tampered-output"),"--incremental-from",tampered_cache,"--deterministic","--json"],1);check_false(path_exists(path_join(root,"tampered-output")))
+
+# Stable offline CMS contract examples for five vendor export shapes.
+vendor_runs:=[]
+for vendor in ["wordpress","contentful","sanity","drupal","generic-sql"] {
+    vendor_run:=path_join(root,"vendor-"+vendor);vendor_runs=push(vendor_runs,vendor_run)
+    run_cli(["build","--cms","examples/vendor-mappings/"+vendor+".cms.json","--out",vendor_run,"--deterministic","--json"],0)
+    check_equal(parse_json(read_file(path_join(vendor_run,"metadata.json")))["counts"]["nodes"],1)
+}
+
+# Deterministic, bounded explanations and SARIF policy output.
+cluster_id:=parse_json(read_file(path_join(adapter_run,"clusters.json")))["clusters"][0]["id"]
+cluster_explain:=parse_json(run_cli(["explain",adapter_run,"--type","cluster","--id",cluster_id,"--limit","1"],0).stdout)
+check_true(cluster_explain["bounded"]);check_false(cluster_explain["automatic_mutation"]);check_true(len(cluster_explain["evidence"])<=1)
+overlap_id:=parse_json(read_file(path_join(adapter_run,"overlaps.json")))["overlaps"][0]["id"]
+check_equal(parse_json(run_cli(["explain",adapter_run,"--type","overlap","--id",overlap_id,"--limit","2"],0).stdout)["type"],"overlap")
+link_id:=parse_json(read_file(path_join(adapter_run,"link-opportunities.json")))["opportunities"][0]["id"]
+check_equal(parse_json(run_cli(["explain",adapter_run,"--type","link","--id",link_id,"--limit","2"],0).stdout)["type"],"link")
+bridge_id:=parse_json(read_file(path_join(adapter_run,"analysis.json")))["bridge_pages"][0]["node_id"]
+check_equal(parse_json(run_cli(["explain",adapter_run,"--type","bridge","--id",bridge_id,"--limit","2"],0).stdout)["type"],"bridge")
+sarif_one:=run_cli(["export",adapter_run,"--format","sarif","--limit","2"],0).stdout
+sarif_two:=run_cli(["export",adapter_run,"--format","sarif","--limit","2"],0).stdout
+check_equal(sarif_one,sarif_two);sarif:=parse_json(sarif_one);check_equal(sarif["version"],"2.1.0");check_true(len(sarif["runs"][0]["results"])<=2);check_false(sarif["runs"][0]["properties"]["automaticMutation"])
 
 # Incremental equivalence, cache invalidation, and comparison differentials.
 incremental:=path_join(root,"incremental")
@@ -129,6 +163,19 @@ property_run:=path_join(root,"property-run")
 run_cli(["build","--source",properties,"--out",property_run,"--deterministic","--json"],0)
 check_equal(parse_json(read_file(path_join(property_run,"metadata.json")))["counts"]["nodes"],1)
 check_true(contains(read_file(path_join(property_run,"nodes.jsonl")),"Café")>0)
+
+# Versioned mixed-script tokenizer and opt-in private local telemetry.
+unicode_source:=path_join(root,"unicode-source");create_dir(unicode_source)
+write_file(path_join(unicode_source,"mixed.md"),"# 多语言 Пример\n\n内容 граф multilingual")
+unicode_run:=path_join(root,"unicode-run")
+run_cli(["build","--source",unicode_source,"--out",unicode_run,"--tokenizer-profile","unicode-lexical/v1","--deterministic","--json"],0)
+unicode_node:=read_jsonl(path_join(unicode_run,"nodes.jsonl"))[0]
+check_true(contains(to_json(unicode_node["topic_signals"]),"多语言")>0);check_equal(parse_json(read_file(path_join(unicode_run,"metadata.json")))["engine"]["tokenizer_profile"],"unicode-lexical/v1")
+telemetry_run:=path_join(root,"telemetry-run")
+run_cli(["build","--source","fixtures/source","--out",telemetry_run,"--telemetry","--json"],0)
+telemetry:=parse_json(read_file(path_join(telemetry_run,"telemetry.json")));check_false(telemetry["privacy"]["content_collected"]);check_false(telemetry["privacy"]["urls_collected"]);check_false(telemetry["privacy"]["queries_collected"]);check_false(telemetry["privacy"]["network_transmission"])
+telemetry_manifest:=parse_json(read_file(path_join(telemetry_run,"manifest.json")));check_equal(telemetry_manifest["artifacts"]["telemetry.json"],sha256_file(path_join(telemetry_run,"telemetry.json")))
+check_false(path_exists(path_join(first,"telemetry.json")))
 
 # Fail-closed resource and schema behavior.
 limited:=path_join(root,"limited")
@@ -159,12 +206,22 @@ kujo_bin:=env("CONTENTGRAPH_KUJO_BIN"); if kujo_bin==""{kujo_bin="../kujo/target
 primitive:=spawn_process([kujo_bin,"run","tests/native_primitives_tests.kujo"],{"timeout_ms":30000,"max_output_bytes":65536})
 check_equal(primitive.exitcode,0)
 
+# Kujo-generated static demo stays byte-deterministic and evidence-linked.
+demo_out:=path_join(root,"demo.html")
+demo_build:=spawn_process([kujo_bin,"run","scripts/build-demo.kujo","--","--out",demo_out],{"timeout_ms":30000,"max_output_bytes":65536})
+check_equal(demo_build.exitcode,0);check_equal(sha256_file(demo_out),sha256_file("demo/index.html"));check_true(contains(read_file(demo_out),"fixtures/golden/run/nodes.jsonl")>0);check_true(contains(read_file(demo_out),"src/engine.kujo")>0)
+
 # Clean UUID-scoped temporary artifacts.
-for path in [first,second,path_join(root,"config-run"),adapter_run,incremental,changed,property_run,path_join(root,"pair-limited"),corrupt,immutability] { cleanup_run(path) }
-legacy_artifacts:=[];for name in ARTIFACTS{if name!="analysis.json"&&name!="manifest.json"&&name!="vector-cache.jsonl"{legacy_artifacts=push(legacy_artifacts,name)}};cleanup_files(legacy,legacy_artifacts)
+for path in [first,second,path_join(root,"config-run"),adapter_run,adapter_warm,incremental,changed,property_run,unicode_run,path_join(root,"pair-limited"),corrupt,immutability] { cleanup_run(path) }
+for path in vendor_runs { cleanup_run(path) }
+if path_exists(path_join(telemetry_run,"telemetry.json")){delete_file(path_join(telemetry_run,"telemetry.json"))};cleanup_run(telemetry_run)
+legacy_artifacts:=[];for name in ARTIFACTS{if name!="analysis.json"&&name!="manifest.json"&&name!="vector-cache.jsonl"&&name!="adapter-cache.jsonl"{legacy_artifacts=push(legacy_artifacts,name)}};cleanup_files(legacy,legacy_artifacts)
+cleanup_files(tampered_cache,ARTIFACTS)
 cleanup_files(changed_source,["guide-a.md","guide-b.md","unrelated.md"])
 cleanup_files(properties,["one.md","two.md"])
+cleanup_files(unicode_source,["mixed.md"]);delete_file(changed_csv)
 dense_names:=[];for i in range(0,20){dense_names=push(dense_names,"page-"+to_string(i)+".md")};cleanup_files(dense,dense_names)
 delete_file(config); delete_file(bad_config)
+delete_file(demo_out)
 os_rmdir(root)
 print("ContentGraph native validation passed.")

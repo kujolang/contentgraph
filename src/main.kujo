@@ -1,7 +1,7 @@
-from src.engine import METHOD, ARTIFACT_NAMES, build_graph, fail
-from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, doctor_schema, config_schema
+from src.engine import METHOD, ARTIFACT_NAMES, build_graph, fail, render_json
+from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, doctor_schema, config_schema, explanation_schema, sarif_schema
 
-VERSION := "0.2.1"
+VERSION := "0.3.0"
 LEGACY_ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","metadata.json","report.md"]
 
 func value_or(mapping, key, fallback) { if has_key(mapping,key) { return mapping[key] }; return fallback }
@@ -13,7 +13,7 @@ func default_options() {
         "overlap_threshold":0.55,"max_nodes":5000,"max_input_bytes":536870912,
         "max_output_bytes":268435456,"max_report_tokens":2000,"max_candidate_pairs":2000000,
         "max_related_per_node":20,"max_term_document_frequency_ratio":1.0,"max_analysis_items":1000,
-        "deterministic":false,"json":false
+        "tokenizer_profile":"deterministic-lexical/v1","telemetry":false,"deterministic":false,"json":false
     }
 }
 
@@ -75,6 +75,8 @@ func parse_build_options(argv) {
         if arg=="--max-related-per-node" { options["max_related_per_node"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
         if arg=="--max-term-document-frequency-ratio" { options["max_term_document_frequency_ratio"]=to_float(require_value(argv,i,arg)); i=i+2; continue }
         if arg=="--max-analysis-items" { options["max_analysis_items"]=to_int(require_value(argv,i,arg)); i=i+2; continue }
+        if arg=="--tokenizer-profile" { options["tokenizer_profile"]=require_value(argv,i,arg); i=i+2; continue }
+        if arg=="--telemetry" { options["telemetry"]=true; i=i+1; continue }
         if arg=="--deterministic" { options["deterministic"]=true; i=i+1; continue }
         if arg=="--json" { options["json"]=true; i=i+1; continue }
         fail("unknown build option: "+arg)
@@ -90,6 +92,8 @@ func parse_build_options(argv) {
     if options["max_related_per_node"]<1 || options["max_related_per_node"]>1000 { fail("max_related_per_node must be between 1 and 1000") }
     if options["max_term_document_frequency_ratio"]<0 || options["max_term_document_frequency_ratio"]>1 { fail("max_term_document_frequency_ratio must be between 0 and 1") }
     if options["max_analysis_items"]<1 || options["max_analysis_items"]>20000 { fail("max_analysis_items must be between 1 and 20000") }
+    if options["tokenizer_profile"]!="deterministic-lexical/v1" && options["tokenizer_profile"]!="unicode-lexical/v1" { fail("tokenizer_profile must be deterministic-lexical/v1 or unicode-lexical/v1") }
+    if options["telemetry"] && options["deterministic"] { fail("--telemetry cannot be combined with --deterministic because elapsed timing is nondeterministic") }
     return options
 }
 
@@ -178,24 +182,49 @@ func write_export(path,text,force) {
     create_dir(dirname(path)); write_file(path,text,force)
 }
 
+func read_wrapper_items(run,name,field) { return parse_json(read_file(path_join(run,name)))[field] }
+func bounded_terms(values,limit){result:=[];for value in slice(values,0,min(limit,len(values))){result=push(result,substring(value,0,min(128,len(value))))};return result}
+
+func explain_run(run,data,kind,target,limit) {
+    evidence:=[];claim:="";found:=false;mapping:=node_map(data["nodes"])
+    if kind=="cluster" {
+        for item in read_wrapper_items(run,"clusters.json","clusters") { if item["id"]==target { found=true;claim="Nodes grouped by bounded deterministic lexical similarity.";for id in item["node_ids"]{if len(evidence)>=limit{break};node:=mapping[id];evidence=push(evidence,{"node_id":id,"title":substring(node["title"],0,min(200,len(node["title"]))),"terms":bounded_terms(node["topic_signals"],8)})} } }
+    } else if kind=="overlap" {
+        for item in read_wrapper_items(run,"overlaps.json","overlaps") { if item["id"]==target { found=true;claim="Pair exceeded the configured overlap threshold and requires intent review.";for edge in data["edges"]{if edge["type"]=="lexical-similarity"&&((edge["source"]==item["left"]&&edge["target"]==item["right"])||(edge["source"]==item["right"]&&edge["target"]==item["left"])){evidence=push(evidence,{"source":edge["source"],"target":edge["target"],"score":edge["weight"],"shared_terms":bounded_terms(value_or(edge["evidence"],"shared_terms",[]),limit)})}} } }
+    } else if kind=="bridge" {
+        analysis:=parse_json(read_file(path_join(run,"analysis.json")));for item in analysis["bridge_pages"]{if item["node_id"]==target{found=true;claim="Node connects otherwise weakly connected graph regions.";evidence=push(evidence,item)}}
+    } else if kind=="link" {
+        for item in read_wrapper_items(run,"link-opportunities.json","opportunities") { if item["id"]==target { found=true;claim="Direction is lexically related and lacks a measured existing internal link.";evidence=push(evidence,{"source":item["source"],"target":item["target"],"score":item["score"],"reason":item["reason"]});for edge in data["edges"]{if edge["type"]=="lexical-similarity"&&((edge["source"]==item["source"]&&edge["target"]==item["target"])||(edge["source"]==item["target"]&&edge["target"]==item["source"])){evidence=push(evidence,{"shared_terms":bounded_terms(value_or(edge["evidence"],"shared_terms",[]),limit)})}} } }
+    } else { fail("explain type must be cluster, overlap, bridge, or link") }
+    if !found{fail("explain target not found: "+target)}
+    return {"schema":"contentgraph.explanation/v1","type":kind,"id":target,"method":METHOD,"claim":claim,"evidence":slice(evidence,0,min(limit,len(evidence))),"bounded":true,"automatic_mutation":false}
+}
+
+func sarif_report(run,data,limit) {
+    results:=[];mapping:=node_map(data["nodes"])
+    for item in read_wrapper_items(run,"orphan-candidates.json","candidates") { if len(results)>=limit{break};node:=mapping[item["node_id"]];title:=substring(node["title"],0,min(200,len(node["title"])));results=push(results,{"ruleId":"CG001","level":"warning","message":{"text":"Orphan or weakly connected content: "+title},"locations":[{"physicalLocation":{"artifactLocation":{"uri":node["source_relative"]}}}],"properties":{"nodeId":item["node_id"],"classification":item["classification"]}}) }
+    for item in read_wrapper_items(run,"overlaps.json","overlaps") { if len(results)>=limit{break};results=push(results,{"ruleId":"CG002","level":"warning","message":{"text":"Potential content overlap requires intent review."},"properties":{"overlapId":item["id"],"left":item["left"],"right":item["right"],"score":item["score"]}}) }
+    for item in read_wrapper_items(run,"link-opportunities.json","opportunities") { if len(results)>=limit{break};results=push(results,{"ruleId":"CG003","level":"note","message":{"text":"Contextual internal-link opportunity requires review."},"properties":{"opportunityId":item["id"],"source":item["source"],"target":item["target"],"score":item["score"]}}) }
+    rules:=[{"id":"CG001","name":"OrphanContent","shortDescription":{"text":"Content has zero or few measured incoming links."},"helpUri":"https://github.com/kujolang/contentgraph/blob/main/docs/methodology.md"},{"id":"CG002","name":"PotentialOverlap","shortDescription":{"text":"Lexical overlap exceeds the configured threshold; intent review is mandatory."},"helpUri":"https://github.com/kujolang/contentgraph/blob/main/docs/methodology.md"},{"id":"CG003","name":"LinkOpportunity","shortDescription":{"text":"Lexically related pages lack a measured link in this direction."},"helpUri":"https://github.com/kujolang/contentgraph/blob/main/docs/methodology.md"}]
+    return {"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"ContentGraph","version":VERSION,"informationUri":"https://github.com/kujolang/contentgraph","rules":rules}},"results":results,"properties":{"method":METHOD,"bounded":true,"resultLimit":limit,"automaticMutation":false}}]}
+}
+
 func doctor_report() {
     kujo_bin:=env("CONTENTGRAPH_KUJO_BIN")
     if kujo_bin=="" { kujo_bin="kujo" }
     kujo:=spawn_process([kujo_bin,"--version"],{"timeout_ms":5000,"max_output_bytes":4096})
-    python:=spawn_process(["python3","--version"],{"timeout_ms":5000,"max_output_bytes":4096})
     probe:=path_join("/tmp","contentgraph-doctor-"+uuid_v4())
     fs_ok:=false
     write_file(probe,"ok")
     if read_file(probe)=="ok" { fs_ok=true; delete_file(probe) }
     kujo_ok:=kujo.exitcode==0
-    python_ok:=python.exitcode==0
     overall_ok:=kujo_ok && fs_ok
-    return {"schema":"contentgraph.doctor/v1","ok":overall_ok,"engine":{"language":"kujo","native":true,"contract":"contentgraph.native-engine/v1"},"runtime":{"kujo":{"ok":kujo_ok,"version":trim(kujo.stdout),"binary":kujo_bin},"python":{"required":false,"available":python_ok,"version":trim(python.stdout+python.stderr)}},"filesystem":{"temporary_read_write_delete":fs_ok},"network_required":false,"paid_api_required":false,"method":METHOD,"contracts":{"graph":"contentgraph.graph/v1","config":"contentgraph.config/v1"},"safe_limits":{"max_nodes_hard":20000,"max_nodes_default":5000,"max_input_bytes_default":536870912,"max_output_bytes_default":268435456,"max_candidate_pairs_default":2000000,"max_analysis_items_default":1000,"guidance":"Lower max_term_document_frequency_ratio for dense high-frequency corpora."}}
+    return {"schema":"contentgraph.doctor/v1","ok":overall_ok,"engine":{"language":"kujo","native":true,"contract":"contentgraph.native-engine/v1"},"runtime":{"kujo":{"ok":kujo_ok,"version":trim(kujo.stdout),"binary":kujo_bin},"python":{"required":false,"probed":false}},"filesystem":{"temporary_read_write_delete":fs_ok},"network_required":false,"paid_api_required":false,"method":METHOD,"contracts":{"graph":"contentgraph.graph/v1","config":"contentgraph.config/v1"},"safe_limits":{"max_nodes_hard":20000,"max_nodes_default":5000,"max_input_bytes_default":536870912,"max_output_bytes_default":268435456,"max_candidate_pairs_default":2000000,"max_analysis_items_default":1000,"guidance":"Lower max_term_document_frequency_ratio for dense high-frequency corpora."}}
 }
 
 func usage() {
     print("ContentGraph "+VERSION)
-    print("Usage: contentgraph <doctor|version|build|inspect|related|orphans|clusters|overlaps|link-opportunities|analysis|compare|export> [options]")
+    print("Usage: contentgraph <doctor|version|build|inspect|related|orphans|clusters|overlaps|link-opportunities|analysis|explain|compare|export> [options]")
 }
 
 func main() {
@@ -211,6 +240,11 @@ func main() {
     if command=="compare" { if len(argv)!=3 { fail("compare requires OLD_RUN NEW_RUN") }; print(to_json_pretty(compare_runs(argv[1],argv[2]))); return }
     if len(argv)<2 { fail(command+" requires a run directory") }
     run_path:=argv[1]; data:=validate_run(run_path)
+    if command=="explain" {
+        kind:="";target:="";limit:=20;i:=2
+        loop{if i>=len(argv){break};if argv[i]=="--type"{kind=require_value(argv,i,"--type");i=i+2}else if argv[i]=="--id"{target=require_value(argv,i,"--id");i=i+2}else if argv[i]=="--limit"{limit=to_int(require_value(argv,i,"--limit"));i=i+2}else{fail("unknown explain option: "+argv[i])}}
+        if target==""||kind==""{fail("explain requires --type and --id")};if limit<1||limit>100{fail("explain --limit must be between 1 and 100")};print(render_json(validate_contract(explain_run(run_path,data,kind,target,limit),explanation_schema(),"explanation")));return
+    }
     if command=="inspect" {
         target:=""; i:=2; loop { if i>=len(argv){break}; if argv[i]=="--node" { target=require_value(argv,i,"--node"); i=i+2 } else { fail("unknown inspect option: "+argv[i]) } }
         if target=="" { fail("inspect requires --node") }
@@ -229,9 +263,9 @@ func main() {
     if command=="link-opportunities" { print(read_file(path_join(run_path,"link-opportunities.json"))); return }
     if command=="analysis" { if !path_is_file(path_join(run_path,"analysis.json")){fail("analysis artifact is unavailable for this legacy run")}; print(read_file(path_join(run_path,"analysis.json"))); return }
     if command=="export" {
-        format_name:="json"; out:=""; force:=false; i:=2
-        loop { if i>=len(argv){break}; if argv[i]=="--format"{format_name=require_value(argv,i,"--format");i=i+2}else if argv[i]=="--out"{out=require_value(argv,i,"--out");i=i+2}else if argv[i]=="--force"{force=true;i=i+1}else{fail("unknown export option: "+argv[i])} }
-        text:=read_file(path_join(run_path,"graph.json")); if format_name=="graphml"{text=graphml(data)}else if format_name!="json"{fail("export format must be json or graphml")}
+        format_name:="json"; out:=""; force:=false; limit:=1000;i:=2
+        loop { if i>=len(argv){break}; if argv[i]=="--format"{format_name=require_value(argv,i,"--format");i=i+2}else if argv[i]=="--out"{out=require_value(argv,i,"--out");i=i+2}else if argv[i]=="--limit"{limit=to_int(require_value(argv,i,"--limit"));i=i+2}else if argv[i]=="--force"{force=true;i=i+1}else{fail("unknown export option: "+argv[i])} }
+        if limit<1||limit>5000{fail("export --limit must be between 1 and 5000")};text:=read_file(path_join(run_path,"graph.json")); if format_name=="graphml"{text=graphml(data)}else if format_name=="sarif"{text=render_json(validate_contract(sarif_report(run_path,data,limit),sarif_schema(),"SARIF export"))}else if format_name!="json"{fail("export format must be json, graphml, or sarif")}
         if out!=""{write_export(out,text,force)}else{print(text)}; return
     }
     fail("unknown command: "+command)

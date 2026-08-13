@@ -1,10 +1,10 @@
-from src.text import stable_id, tokens, array_has
-from src.ingest import value_or, ingest_source, ingest_siteprobe, ingest_sitemap, ingest_csv, ingest_cms, add_search_associations
+from src.text import stable_id, tokens_with_profile, array_has
+from src.ingest import value_or, consume_input, source_files, ingest_source, ingest_siteprobe, ingest_sitemap, ingest_csv, ingest_cms, add_search_associations
 from src.analytics import analyze_graph
-from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, vector_cache_entry_schema
+from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, vector_cache_entry_schema, adapter_cache_entry_schema, telemetry_schema
 
 METHOD := "deterministic-lexical/v1"
-ARTIFACT_NAMES := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","manifest.json"]
+ARTIFACT_NAMES := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","adapter-cache.jsonl","manifest.json"]
 
 func fail(message) { eprint("ContentGraph: " + message); exit(1) }
 
@@ -87,17 +87,17 @@ func pad5(value) {
     return text
 }
 
-func build_vectors(nodes, max_df_ratio, previous_cache) {
+func build_vectors(nodes, max_df_ratio, previous_cache, tokenizer_profile) {
     docs := {}
     df := {}
     reused_tokenizations := 0
     for node in nodes {
         terms := []
-        if has_key(previous_cache,node["id"]) && previous_cache[node["id"]]["content_fingerprint"]==node["content_fingerprint"] {
+        if has_key(previous_cache,node["id"]) && previous_cache[node["id"]]["content_fingerprint"]==node["content_fingerprint"] && value_or(previous_cache[node["id"]],"tokenizer_profile","deterministic-lexical/v1")==tokenizer_profile {
             terms=previous_cache[node["id"]]["terms"]
             reused_tokenizations=reused_tokenizations+1
         } else {
-            terms=tokens(node["title"] + " " + node["title"] + " " + node["text"])
+            terms=tokens_with_profile(node["title"] + " " + node["title"] + " " + node["text"],tokenizer_profile)
         }
         docs[node["id"]] = terms
         seen := {}
@@ -108,7 +108,7 @@ func build_vectors(nodes, max_df_ratio, previous_cache) {
     vectors := {}
     signals := {}
     postings := {}
-    skipped_terms := []
+    skipped_term_set := {}
     for node in nodes {
         counts := {}
         for term in docs[node["id"]] { counts = dict_increment(counts, term, 1) }
@@ -117,7 +117,7 @@ func build_vectors(nodes, max_df_ratio, previous_cache) {
         ranked := []
         for term in sort(keys(counts)) {
             if df[term] / total > max_df_ratio {
-                if !array_has(skipped_terms, term) { skipped_terms = push(skipped_terms, term) }
+                skipped_term_set[term]=true
                 continue
             }
             weight := (1.0 + log(counts[term])) * (log((1.0 + total) / (1.0 + df[term])) + 1.0)
@@ -141,10 +141,13 @@ func build_vectors(nodes, max_df_ratio, previous_cache) {
     }
     cache_entries:=range(0,len(nodes)); cache_index:=0
     for node in nodes {
-        cache_entries[cache_index]={"schema":"contentgraph.vector-cache-entry/v1","node_id":node["id"],"content_fingerprint":node["content_fingerprint"],"terms":docs[node["id"]]}
+        cache_entries[cache_index]={"schema":"contentgraph.vector-cache-entry/v1","node_id":node["id"],"content_fingerprint":node["content_fingerprint"],"terms":docs[node["id"]],"tokenizer_profile":tokenizer_profile}
         cache_index=cache_index+1
     }
-    return {"vectors":vectors,"signals":signals,"postings":postings,"skipped_terms":sort(skipped_terms),"cache_entries":cache_entries,"reused_tokenizations":reused_tokenizations}
+    skipped_term_count:=len(keys(skipped_term_set));skipped_terms:=[]
+    if skipped_term_count<=100{skipped_terms=sort(keys(skipped_term_set))}
+    else{sample_keys:=sort(slice(keys(skipped_term_set),0,100));skipped_terms=sample_keys}
+    return {"vectors":vectors,"signals":signals,"postings":postings,"skipped_terms":skipped_terms,"skipped_term_count":skipped_term_count,"cache_entries":cache_entries,"reused_tokenizations":reused_tokenizations}
 }
 
 func load_vector_cache(run) {
@@ -158,6 +161,52 @@ func load_vector_cache(run) {
         result[entry["node_id"]]=entry
     }
     return result
+}
+
+func adapter_files(adapter, input) {
+    if adapter=="source" { if !path_exists(input){return []};files:=source_files(input,""); paths:=[];for item in files{paths=push(paths,item["path"])};return paths }
+    if adapter=="siteprobe" { return [path_join(input,"pages.jsonl"),path_join(input,"links.json")] }
+    return [input]
+}
+
+func adapter_fingerprint(adapter,input,paths) {
+    records:=[]
+    for path in paths {
+        if !path_is_file(path) { return "" }
+        records=push(records,replace_str(path,"\\","/")+":"+to_string(file_size(path))+":"+sha256_file(path))
+    }
+    return sha256(adapter+"\n"+replace_str(input,"\\","/")+"\n"+join(sort(records),"\n"))
+}
+
+func load_adapter_cache(run) {
+    result:={}
+    if run=="" { return result }
+    path:=path_join(run,"adapter-cache.jsonl")
+    if !path_is_file(path) { return result }
+    for line in read_lines(path) {
+        if trim(line)=="" {continue}
+        entry:=validate_contract(parse_json(line),adapter_cache_entry_schema(),"stored adapter cache entry")
+        result[entry["adapter"]+"|"+entry["input"]+"|"+entry["fingerprint"]]=entry
+    }
+    return result
+}
+
+func validate_incremental_integrity(run) {
+    if run==""{return}
+    manifest_path:=path_join(run,"manifest.json")
+    if !path_is_file(manifest_path){return}
+    manifest:=validate_contract(parse_json(read_file(manifest_path)),manifest_schema(),"incremental manifest")
+    for name in keys(manifest["artifacts"]){path:=path_join(run,name);if !path_is_file(path)||sha256_file(path)!=manifest["artifacts"][name]{fail("incremental artifact integrity check failed: "+name)}}
+}
+
+func cached_adapter(cache,adapter,input,fingerprint_value) {
+    key:=adapter+"|"+replace_str(input,"\\","/")+"|"+fingerprint_value
+    if has_key(cache,key) { return cache[key] }
+    return null
+}
+
+func adapter_cache_entry(adapter,input,fingerprint_value,result) {
+    return {"schema":"contentgraph.adapter-cache-entry/v1","adapter":adapter,"input":replace_str(input,"\\","/"),"fingerprint":fingerprint_value,"nodes":result["nodes"],"edges":result["edges"]}
 }
 
 func find_root(parent, node_id) {
@@ -340,7 +389,7 @@ func validate_artifacts(values) {
             wrapper_offset=wrapper_offset+250
         }
     }
-    analysis_header:={"schema":values["analysis"]["schema"],"summary":values["analysis"]["summary"],"components":[],"bridge_pages":[],"authorities":[],"hubs":[],"crawl_depth_drift":[],"cluster_health":[]}
+    analysis_header:={"schema":values["analysis"]["schema"],"summary":values["analysis"]["summary"],"components":[],"bridge_pages":[],"authorities":[],"hubs":[],"crawl_depth_drift":[],"cluster_health":[],"method":values["analysis"]["method"]}
     validate_contract(analysis_header, analysis_schema(), "analysis artifact")
     for field in ["components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health"] {
         analysis_offset:=0
@@ -398,42 +447,130 @@ func publish_artifacts(out, artifacts, maximum) {
     return total
 }
 
+func write_json_array_stream(path,prefix,values,suffix) {
+    write_file(path,prefix)
+    index:=0;buffer:=""
+    for value in values { if index>0{buffer=buffer+","};buffer=buffer+canonical_json(value);if len(buffer)>=262144{append_file(path,buffer);buffer=""};index=index+1 }
+    append_file(path,buffer+suffix)
+}
+
+func write_jsonl_stream(path,values) {
+    write_file(path,"");buffer:=""
+    for value in values { buffer=buffer+canonical_json(value)+"\n";if len(buffer)>=262144{append_file(path,buffer);buffer=""} }
+    if buffer!=""{append_file(path,buffer)}
+}
+
+func write_graph_stream(path,graph,edges) {
+    write_file(path,"{\"edges\":[")
+    index:=0;buffer:=""
+    for edge in edges { if index>0{buffer=buffer+","};buffer=buffer+canonical_json({"source":edge["source"],"target":edge["target"],"type":edge["type"],"weight":edge["weight"]});if len(buffer)>=262144{append_file(path,buffer);buffer=""};index=index+1 }
+    append_file(path,buffer+"],\"generated_at\":"+canonical_json(graph["generated_at"])+",\"method\":"+canonical_json(graph["method"])+",\"nodes\":"+canonical_json(graph["nodes"])+",\"run_id\":"+canonical_json(graph["run_id"])+",\"schema\":"+canonical_json(graph["schema"])+"}\n")
+}
+
+func write_analysis_stream(path,analysis) {
+    fields:=["authorities","bridge_pages","cluster_health","components","crawl_depth_drift","hubs"]
+    write_file(path,"{")
+    field_index:=0
+    for field in fields {
+        if field_index>0{append_file(path,",")};append_file(path,canonical_json(field)+":[")
+        item_index:=0;buffer:="";for item in analysis[field]{if item_index>0{buffer=buffer+","};buffer=buffer+canonical_json(item);if len(buffer)>=262144{append_file(path,buffer);buffer=""};item_index=item_index+1}
+        append_file(path,buffer+"]");field_index=field_index+1
+    }
+    append_file(path,",\"method\":"+canonical_json(analysis["method"])+",\"schema\":"+canonical_json(analysis["schema"])+",\"summary\":"+canonical_json(analysis["summary"])+"}\n")
+}
+
+func publish_value_artifacts(out,values,report,vector_cache,adapter_entries,telemetry,maximum) {
+    if path_exists(out){fail("output path already exists: "+out)}
+    parent:=dirname(out);create_dir(parent);staging:=path_join(parent,"."+basename(out)+".tmp-"+uuid_v4());create_dir(staging)
+    names:=["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","adapter-cache.jsonl"]
+    if telemetry!=null{names=push(names,"telemetry.json")}
+    try {
+        write_graph_stream(path_join(staging,"graph.json"),values["graph"],values["edges"])
+        write_jsonl_stream(path_join(staging,"nodes.jsonl"),values["nodes"])
+        write_jsonl_stream(path_join(staging,"edges.jsonl"),values["edges"])
+        write_json_array_stream(path_join(staging,"clusters.json"),"{\"clusters\":[",values["clusters"]["clusters"],"],\"schema\":\"contentgraph.clusters/v1\"}\n")
+        write_json_array_stream(path_join(staging,"overlaps.json"),"{\"overlaps\":[",values["overlaps"]["overlaps"],"],\"schema\":\"contentgraph.overlaps/v1\"}\n")
+        write_json_array_stream(path_join(staging,"orphan-candidates.json"),"{\"candidates\":[",values["orphans"]["candidates"],"],\"schema\":\"contentgraph.orphans/v1\"}\n")
+        write_json_array_stream(path_join(staging,"link-opportunities.json"),"{\"opportunities\":[",values["opportunities"]["opportunities"],"],\"schema\":\"contentgraph.link-opportunities/v1\"}\n")
+        write_analysis_stream(path_join(staging,"analysis.json"),values["analysis"])
+        write_artifact_chunks(path_join(staging,"metadata.json"),render_json(values["metadata"]))
+        write_artifact_chunks(path_join(staging,"report.md"),report)
+        write_jsonl_stream(path_join(staging,"vector-cache.jsonl"),vector_cache)
+        write_jsonl_stream(path_join(staging,"adapter-cache.jsonl"),adapter_entries)
+        if telemetry!=null{write_artifact_chunks(path_join(staging,"telemetry.json"),render_json(telemetry))}
+    } except error { cleanup_staging(staging,names);fail("artifact write failed: "+substring(to_string(error),0,min(200,len(to_string(error))))) }
+    total:=0;hashes:={}
+    for name in sort(names){path:=path_join(staging,name);total=total+file_size(path);if total>maximum{cleanup_staging(staging,names);fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)")};hashes[name]=sha256_file(path)}
+    manifest:=validate_contract({"schema":"contentgraph.manifest/v1","artifacts":hashes},manifest_schema(),"manifest artifact")
+    write_artifact_chunks(path_join(staging,"manifest.json"),render_json(manifest));names=push(names,"manifest.json");total=total+file_size(path_join(staging,"manifest.json"))
+    if total>maximum{cleanup_staging(staging,names);fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)")}
+    rename_file(staging,out);return total
+}
+
 func input_fingerprint(budget, options) {
     records := []
     for file in budget["files"] { records = push(records, file["path"] + ":" + file["sha256"] + ":" + to_string(file["bytes"])) }
-    settings := {"min_similarity":options["min_similarity"],"cluster_threshold":options["cluster_threshold"],"overlap_threshold":options["overlap_threshold"],"max_related_per_node":options["max_related_per_node"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"],"max_analysis_items":options["max_analysis_items"]}
+    settings := {"min_similarity":options["min_similarity"],"cluster_threshold":options["cluster_threshold"],"overlap_threshold":options["overlap_threshold"],"max_related_per_node":options["max_related_per_node"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"],"max_analysis_items":options["max_analysis_items"],"tokenizer_profile":options["tokenizer_profile"],"deterministic":options["deterministic"]}
     return sha256(join(sort(records), "\n") + "\n" + canonical_json(settings))
 }
 
 func try_incremental(options, fingerprint_value) {
     previous := options["incremental_from"]
     if previous == "" { return false }
+    if options["telemetry"] { return false }
     metadata_path := path_join(previous, "metadata.json")
     if !path_is_file(metadata_path) { fail("invalid incremental run: " + previous) }
     metadata := parse_json(read_file(metadata_path))
     if has_key(metadata, "cache") == 0 || value_or(metadata["cache"], "input_fingerprint", "") != fingerprint_value { return false }
     artifacts := {}
-    for name in ARTIFACT_NAMES {
+    incremental_names:=ARTIFACT_NAMES
+    # 0.2 runs predate the adapter cache. Copy their immutable artifacts and
+    # synthesize an empty v1 cache so exact-input reuse remains compatible.
+    if !path_is_file(path_join(previous,"adapter-cache.jsonl")) { incremental_names=[];for name in ARTIFACT_NAMES{if name!="adapter-cache.jsonl"{incremental_names=push(incremental_names,name)}} }
+    for name in incremental_names {
         path := path_join(previous, name)
         if !path_is_file(path) { fail("invalid incremental run, missing: " + name) }
         artifacts[name] = read_file(path)
     }
+    if has_key(artifacts,"adapter-cache.jsonl")==0 { artifacts["adapter-cache.jsonl"]="" }
     publish_artifacts(options["out"], artifacts, options["max_output_bytes"])
     return true
 }
 
 func build_graph(options) {
+    build_started:=performance_now()
     total_inputs := len(options["source"])+len(options["siteprobe"])+len(options["sitemap"])+len(options["csv"])+len(options["cms"])
     if total_inputs == 0 { fail("build requires source, siteprobe, sitemap, csv, or cms input") }
+    validate_incremental_integrity(options["incremental_from"])
     budget := {"used":0,"maximum":options["max_input_bytes"],"files":[]}
     groups := []
     existing_edges := []
-    for path in options["siteprobe"] { result := ingest_siteprobe(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]); existing_edges=concat(existing_edges,result["edges"]) }
-    for path in options["source"] { result := ingest_source(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
-    for path in options["sitemap"] { result := ingest_sitemap(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
-    for path in options["csv"] { result := ingest_csv(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
-    for path in options["cms"] { result := ingest_cms(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
+    result := null
+    adapter_cache:=load_adapter_cache(options["incremental_from"]); adapter_cache_entries:=[];adapter_cache_hits:=0;adapter_cache_misses:=0
+    for path in options["siteprobe"] {
+        paths:=adapter_files("siteprobe",path);fp:=adapter_fingerprint("siteprobe",path,paths);cached:=cached_adapter(adapter_cache,"siteprobe",path,fp)
+        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 }
+        else { result=ingest_siteprobe(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
+        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("siteprobe",path,fp,result));groups=push(groups,result["nodes"]);existing_edges=concat(existing_edges,result["edges"])
+    }
+    for path in options["source"] { result = ingest_source(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
+    for path in options["sitemap"] {
+        paths:=adapter_files("sitemap",path);fp:=adapter_fingerprint("sitemap",path,paths);cached:=cached_adapter(adapter_cache,"sitemap",path,fp)
+        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 } else { result=ingest_sitemap(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
+        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("sitemap",path,fp,result));groups=push(groups,result["nodes"])
+    }
+    for path in options["csv"] {
+        paths:=adapter_files("csv",path);fp:=adapter_fingerprint("csv",path,paths);cached:=cached_adapter(adapter_cache,"csv",path,fp)
+        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 } else { result=ingest_csv(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
+        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("csv",path,fp,result));groups=push(groups,result["nodes"])
+    }
+    for path in options["cms"] {
+        paths:=adapter_files("cms",path);fp:=adapter_fingerprint("cms",path,paths);cached:=cached_adapter(adapter_cache,"cms",path,fp)
+        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 } else { result=ingest_cms(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
+        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("cms",path,fp,result));groups=push(groups,result["nodes"])
+    }
     nodes := merge_nodes(groups, options["max_nodes"])
+    groups=[]
     search_result := add_search_associations(options["searchbridge"], nodes, budget)
     search_edges := search_result["edges"]; nodes=search_result["nodes"]; budget=search_result["budget"]
     fingerprint_value := input_fingerprint(budget, options)
@@ -445,7 +582,7 @@ func build_graph(options) {
     node_map := {}
     for node in nodes { node_map[node["id"]]=node }
     ids := sort(keys(node_map))
-    vector_data := build_vectors(nodes, options["max_term_document_frequency_ratio"], load_vector_cache(options["incremental_from"]))
+    vector_data := build_vectors(nodes, options["max_term_document_frequency_ratio"], load_vector_cache(options["incremental_from"]), options["tokenizer_profile"])
     similarity := streaming_similarity(ids, vector_data, options)
     similarities := similarity["similarities"]
     cluster_result := build_clusters(ids, similarity["parent"], vector_data["signals"], node_map)
@@ -488,6 +625,7 @@ func build_graph(options) {
         for pair in items(node) { if pair[0] != "text" && pair[0] != "existing_targets" { public_node[pair[0]]=pair[1] } }
         final_nodes[final_index]=public_node; final_index=final_index+1
     }
+    nodes=[];node_map={}
     overlaps_map := {}
     opportunities_map := {}
     for item in similarities {
@@ -499,6 +637,8 @@ func build_graph(options) {
     }
     overlaps:=range(0,len(keys(overlaps_map))); overlap_index:=0; for key in sort(keys(overlaps_map)){overlaps[overlap_index]=overlaps_map[key];overlap_index=overlap_index+1}
     opportunities:=range(0,len(keys(opportunities_map))); opportunity_index:=0; for key in sort(keys(opportunities_map)){opportunities[opportunity_index]=opportunities_map[key];opportunity_index=opportunity_index+1}
+    vector_cache_entries:=vector_data["cache_entries"];skipped_terms:=vector_data["skipped_terms"];skipped_term_count:=vector_data["skipped_term_count"];reused_tokenizations:=vector_data["reused_tokenizations"];candidate_pair_count:=similarity["candidate_pairs"];retained_similarity_count:=len(similarities)
+    vector_data={};similarity={};similarities=[];overlaps_map={};opportunities_map={}
     orphan_map := {}
     for node in final_nodes {
         if node["incoming_links"] <= 1 { classification := "weakly-connected"; if node["incoming_links"]==0 { classification="orphan" }; orphan_map[node["id"]]={"node_id":node["id"],"url":node["url"],"title":node["title"],"incoming_links":node["incoming_links"],"classification":classification} }
@@ -515,17 +655,17 @@ func build_graph(options) {
     overlaps_doc := {"schema":"contentgraph.overlaps/v1","overlaps":overlaps}
     orphans_doc := {"schema":"contentgraph.orphans/v1","candidates":orphans}
     opportunities_doc := {"schema":"contentgraph.link-opportunities/v1","opportunities":opportunities}
-    metadata := {"schema":"contentgraph.metadata/v1","run_id":run_id,"inputs":{"siteprobe":options["siteprobe"],"source":options["source"],"searchbridge":options["searchbridge"],"sitemap":options["sitemap"],"csv":options["csv"],"cms":options["cms"]},"adapters":{"source":"contentgraph.source-files/v1","siteprobe":"siteprobe.run/v1","searchbridge":"searchbridge.result/v1","sitemap":"contentgraph.sitemap-xml/v1","csv":"contentgraph.csv-export/v1","cms":"contentgraph.cms-export/v1"},"thresholds":{"minimum":options["min_similarity"],"cluster":options["cluster_threshold"],"overlap":options["overlap_threshold"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"]},"budgets":{"max_nodes":options["max_nodes"],"max_input_bytes":options["max_input_bytes"],"max_output_bytes":options["max_output_bytes"],"max_report_tokens":options["max_report_tokens"],"max_candidate_pairs":options["max_candidate_pairs"],"max_related_per_node":options["max_related_per_node"],"max_analysis_items":options["max_analysis_items"]},"usage":{"input_bytes":budget["used"],"candidate_pairs":similarity["candidate_pairs"],"retained_similarity_pairs":len(similarities),"skipped_high_frequency_terms":vector_data["skipped_terms"],"reused_tokenizations":vector_data["reused_tokenizations"]},"counts":{"nodes":len(final_nodes),"edges":len(edges),"clusters":len(clusters),"overlaps":len(overlaps),"orphans":len(orphans),"link_opportunities":len(opportunities)},"cache":{"input_fingerprint":fingerprint_value,"input_dependencies":budget["files"],"incremental_from":options["incremental_from"],"hit":false},"engine":{"language":"kujo","contract":"contentgraph.native-engine/v1"}}
+    metadata := {"schema":"contentgraph.metadata/v1","run_id":run_id,"inputs":{"siteprobe":options["siteprobe"],"source":options["source"],"searchbridge":options["searchbridge"],"sitemap":options["sitemap"],"csv":options["csv"],"cms":options["cms"]},"adapters":{"source":"contentgraph.source-files/v1","siteprobe":"siteprobe.run/v1","searchbridge":"searchbridge.result/v1","sitemap":"contentgraph.sitemap-xml/v1","csv":"contentgraph.csv-export/v1","cms":"contentgraph.cms-export/v1"},"thresholds":{"minimum":options["min_similarity"],"cluster":options["cluster_threshold"],"overlap":options["overlap_threshold"],"max_term_document_frequency_ratio":options["max_term_document_frequency_ratio"]},"budgets":{"max_nodes":options["max_nodes"],"max_input_bytes":options["max_input_bytes"],"max_output_bytes":options["max_output_bytes"],"max_report_tokens":options["max_report_tokens"],"max_candidate_pairs":options["max_candidate_pairs"],"max_related_per_node":options["max_related_per_node"],"max_analysis_items":options["max_analysis_items"]},"usage":{"input_bytes":budget["used"],"candidate_pairs":candidate_pair_count,"retained_similarity_pairs":retained_similarity_count,"skipped_high_frequency_terms":skipped_terms,"skipped_high_frequency_term_count":skipped_term_count,"reused_tokenizations":reused_tokenizations,"adapter_cache_hits":adapter_cache_hits,"adapter_cache_misses":adapter_cache_misses},"counts":{"nodes":len(final_nodes),"edges":len(edges),"clusters":len(clusters),"overlaps":len(overlaps),"orphans":len(orphans),"link_opportunities":len(opportunities)},"cache":{"input_fingerprint":fingerprint_value,"input_dependencies":budget["files"],"incremental_from":options["incremental_from"],"hit":false,"adapter_contract":"contentgraph.adapter-cache-entry/v1"},"engine":{"language":"kujo","contract":"contentgraph.native-engine/v1","tokenizer_profile":options["tokenizer_profile"]}}
     values := {"graph":graph,"nodes":final_nodes,"edges":edges,"clusters":clusters_doc,"overlaps":overlaps_doc,"orphans":orphans_doc,"opportunities":opportunities_doc,"analysis":analysis,"metadata":metadata}
     validate_artifacts(values)
     report := "# ContentGraph Report\n\nRun: "+run_id+"\n\n## Attention\n\n- Orphan or weak candidates: "+to_string(len(orphans))+"\n- High-overlap candidates requiring intent review: "+to_string(len(overlaps))+"\n- Contextual link opportunities requiring review: "+to_string(len(opportunities))+"\n- Bridge-page candidates: "+to_string(len(analysis["bridge_pages"]))+"\n- Crawl-depth drift candidates: "+to_string(len(analysis["crawl_depth_drift"]))+"\n\n## Coverage\n\n- Content nodes: "+to_string(len(final_nodes))+"\n- Relationship edges: "+to_string(len(edges))+"\n- Topic clusters: "+to_string(len(clusters))+"\n- Connected components: "+to_string(analysis["summary"]["component_count"])+"\n\nMethod: `"+METHOD+"`. Full evidence remains in the run directory.\nReport budget: "+to_string(options["max_report_tokens"])+" approximate tokens.\n"
     cache_offset:=0
-    loop { if cache_offset>=len(vector_data["cache_entries"]){break}; validate_contract(slice(vector_data["cache_entries"],cache_offset,min(cache_offset+500,len(vector_data["cache_entries"]))),{"type":"array","items":vector_cache_entry_schema()},"vector cache artifact"); cache_offset=cache_offset+500 }
-    artifacts := {"graph.json":render_json(graph),"nodes.jsonl":render_jsonl(final_nodes),"edges.jsonl":render_jsonl(edges),"clusters.json":render_json(clusters_doc),"overlaps.json":render_json(overlaps_doc),"orphan-candidates.json":render_json(orphans_doc),"link-opportunities.json":render_json(opportunities_doc),"analysis.json":render_json(analysis),"metadata.json":render_json(metadata),"report.md":report,"vector-cache.jsonl":render_jsonl(vector_data["cache_entries"])}
-    hashes:={};for name in sort(keys(artifacts)){hashes[name]=sha256(artifacts[name])}
-    manifest:=validate_contract({"schema":"contentgraph.manifest/v1","artifacts":hashes},manifest_schema(),"manifest artifact")
-    artifacts["manifest.json"]=render_json(manifest)
-    output_bytes := publish_artifacts(options["out"],artifacts,options["max_output_bytes"])
+    loop { if cache_offset>=len(vector_cache_entries){break}; validate_contract(slice(vector_cache_entries,cache_offset,min(cache_offset+500,len(vector_cache_entries))),{"type":"array","items":vector_cache_entry_schema()},"vector cache artifact"); cache_offset=cache_offset+500 }
+    cache_offset=0
+    loop { if cache_offset>=len(adapter_cache_entries){break}; validate_contract(slice(adapter_cache_entries,cache_offset,min(cache_offset+100,len(adapter_cache_entries))),{"type":"array","items":adapter_cache_entry_schema()},"adapter cache artifact"); cache_offset=cache_offset+100 }
+    telemetry:=null
+    if options["telemetry"] { telemetry=validate_contract({"schema":"contentgraph.telemetry/v1","elapsed_ms":round(performance_now()-build_started),"input_bytes":budget["used"],"output_nodes":len(final_nodes),"candidate_pairs":candidate_pair_count,"adapter_cache_hits":adapter_cache_hits,"reused_tokenizations":reused_tokenizations,"privacy":{"content_collected":false,"urls_collected":false,"queries_collected":false,"network_transmission":false}},telemetry_schema(),"telemetry artifact") }
+    output_bytes := publish_value_artifacts(options["out"],values,report,vector_cache_entries,adapter_cache_entries,telemetry,options["max_output_bytes"])
     result := {"run":options["out"],"counts":metadata["counts"],"usage":metadata["usage"],"output_bytes":output_bytes,"cache":"miss"}
     if options["json"] { print(to_json(result)) } else { print("ContentGraph build complete: "+options["out"]); print("Nodes: "+to_string(len(final_nodes))+"  Edges: "+to_string(len(edges))) }
     return 0

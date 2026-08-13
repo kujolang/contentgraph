@@ -78,7 +78,7 @@ func metadata_schema() {
 }
 
 func analysis_schema() {
-    return {"type":"object","required":["schema","summary","components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health"],"properties":{"schema":{"const":"contentgraph.analysis/v1"},"summary":{"type":"object"}}}
+    return {"type":"object","required":["schema","summary","components","bridge_pages","authorities","hubs","crawl_depth_drift","cluster_health","method"],"properties":{"schema":{"const":"contentgraph.analysis/v1"},"summary":{"type":"object"},"method":{"const":"deterministic-graph-analysis/v1"}}}
 }
 
 func manifest_schema() {
@@ -102,9 +102,66 @@ func vector_cache_entry_schema() {
             "schema":{"const":"contentgraph.vector-cache-entry/v1"},
             "node_id":{"type":"string","pattern":"^CG-[a-f0-9]{20}$"},
             "content_fingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},
-            "terms":{"type":"array","items":{"type":"string"}}
+            "terms":{"type":"array","items":{"type":"string"}},
+            "tokenizer_profile":{"type":"string"}
         }
     }
+}
+
+func adapter_cache_entry_schema() {
+    return {
+        "type":"object",
+        "required":["schema","adapter","input","fingerprint","nodes","edges"],
+        "additionalProperties":false,
+        "properties":{
+            "schema":{"const":"contentgraph.adapter-cache-entry/v1"},
+            "adapter":{"enum":["siteprobe","sitemap","csv","cms"]},
+            "input":{"type":"string","minLength":1},
+            "fingerprint":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "nodes":{"type":"array"},
+            "edges":{"type":"array"}
+        }
+    }
+}
+
+func explanation_schema() {
+    return {
+        "type":"object",
+        "required":["schema","type","id","method","claim","evidence","bounded","automatic_mutation"],
+        "additionalProperties":false,
+        "properties":{
+            "schema":{"const":"contentgraph.explanation/v1"},
+            "type":{"enum":["cluster","overlap","bridge","link"]},
+            "id":{"type":"string","minLength":1},
+            "method":{"const":"deterministic-lexical/v1"},
+            "claim":{"type":"string","minLength":1},
+            "evidence":{"type":"array"},
+            "bounded":{"const":true},
+            "automatic_mutation":{"const":false}
+        }
+    }
+}
+
+func telemetry_schema() {
+    return {
+        "type":"object",
+        "required":["schema","elapsed_ms","input_bytes","output_nodes","candidate_pairs","adapter_cache_hits","reused_tokenizations","privacy"],
+        "additionalProperties":false,
+        "properties":{
+            "schema":{"const":"contentgraph.telemetry/v1"},
+            "elapsed_ms":{"type":"integer","minimum":0},
+            "input_bytes":{"type":"integer","minimum":0},
+            "output_nodes":{"type":"integer","minimum":0},
+            "candidate_pairs":{"type":"integer","minimum":0},
+            "adapter_cache_hits":{"type":"integer","minimum":0},
+            "reused_tokenizations":{"type":"integer","minimum":0},
+            "privacy":{"type":"object","required":["content_collected","urls_collected","queries_collected","network_transmission"],"additionalProperties":false,"properties":{"content_collected":{"const":false},"urls_collected":{"const":false},"queries_collected":{"const":false},"network_transmission":{"const":false}}}
+        }
+    }
+}
+
+func sarif_schema() {
+    return {"type":"object","required":["$schema","version","runs"],"properties":{"$schema":{"type":"string"},"version":{"const":"2.1.0"},"runs":{"type":"array","items":{"type":"object","required":["tool","results","properties"]}}}}
 }
 
 func doctor_schema() {
@@ -166,6 +223,8 @@ func config_schema() {
                     "max_related_per_node":{"type":"integer","minimum":1,"maximum":1000},
                     "max_term_document_frequency_ratio":{"type":"number","minimum":0,"maximum":1},
                     "max_analysis_items":{"type":"integer","minimum":1,"maximum":20000},
+                    "tokenizer_profile":{"enum":["deterministic-lexical/v1","unicode-lexical/v1"]},
+                    "telemetry":{"type":"boolean"},
                     "deterministic":{"type":"boolean"},
                     "json":{"type":"boolean"}
                 }
@@ -183,6 +242,10 @@ export metadata_schema := metadata_schema
 export analysis_schema := analysis_schema
 export manifest_schema := manifest_schema
 export vector_cache_entry_schema := vector_cache_entry_schema
+export adapter_cache_entry_schema := adapter_cache_entry_schema
+export explanation_schema := explanation_schema
+export telemetry_schema := telemetry_schema
+export sarif_schema := sarif_schema
 export doctor_schema := doctor_schema
 export siteprobe_page_schema := siteprobe_page_schema
 export siteprobe_links_schema := siteprobe_links_schema

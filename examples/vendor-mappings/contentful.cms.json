@@ -1,0 +1,1 @@
+{"schema":"contentgraph.cms-export/v1","entries":[{"id":"contentful-entry-a","url":"https://example.com/contentful-guide/","canonical":"https://example.com/contentful-guide/","title":"Contentful Guide","content":"Rendered localized rich-text content.","content_type":"text/plain","updated_at":"2026-08-02T12:00:00Z","status":"published"}]}
