@@ -47,8 +47,8 @@ copy_file(sbom_path,path_join(bundle,basename(sbom_path)))
 copy_file(provenance_path,path_join(bundle,basename(provenance_path)))
 spawn_process(["touch","-t","197001010000",path_join(bundle,basename(sbom_path))],{"timeout_ms":5000,"max_output_bytes":4096})
 spawn_process(["touch","-t","197001010000",path_join(bundle,basename(provenance_path))],{"timeout_ms":5000,"max_output_bytes":4096})
-stage_directories:=["src","schemas","scripts","docs","examples","fixtures/golden/run","fixtures/golden","fixtures/adapters/siteprobe","fixtures/adapters","fixtures/source","fixtures","demo","benchmarks","tests",""]
-for directory in stage_directories { spawn_process(["touch","-t","197001010000",path_join(bundle,directory)],{"timeout_ms":5000,"max_output_bytes":4096}) }
+normalize_times:=spawn_process(["find",bundle,"-exec","touch","-t","197001010000","{}","+"],{"timeout_ms":30000,"max_output_bytes":4096})
+if normalize_times.exitcode!=0 { eprint("ContentGraph release timestamp normalization failed: "+normalize_times.stderr);exit(1) }
 archive_result:=spawn_process(["tar","-cf",tar_path,"--sort=name","--mtime=1970-01-01T00:00:00Z","--owner=0","--group=0","--numeric-owner","-C",stage,bundle_name],{"timeout_ms":120000,"max_output_bytes":65536})
 if archive_result.exitcode!=0 {
     # BSD tar sees the same sorted, epoch-stamped staging tree.
