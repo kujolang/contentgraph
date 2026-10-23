@@ -1,0 +1,24 @@
+[package]
+name = "contentgraph"
+version = "0.3.0"
+description = "contentgraph"
+license = "MIT"
+authors = ["Kujolang <contact@kujolang.ai>"]
+repository = "https://github.com/kujolang/contentgraph"
+documentation = "https://github.com/kujolang/contentgraph#readme"
+readme = "README.md"
+
+[package.exports]
+cli = "src/main.kujo"
+
+[kujo]
+minimum_version = "1.0.0"
+entry = "src/main.kujo"
+sources = ["."]
+includes = ["README.md", "LICENSE", "CHANGELOG.md", "VERSION", "kujo.toml", "docs", "examples", "fixtures", "schemas", "scripts", "tests"]
+excludes = [".git", ".contentgraph", ".kennel_tmp", "kennel_packages", "node_modules", "target", "dist", "build", "output", "__pycache__", ".runtime", ".loop-engineering"]
+
+[dependencies]
+
+[scripts]
+verify = "bash scripts/validate.sh"
