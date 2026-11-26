@@ -1,0 +1,17 @@
+# ContentGraph repository hardening
+
+Reviewed `main` from `79e82ae96c0b9e55bd5b182e2ef4d1415cbdb95b`. Verified implementation at `9a8e338dcfc0470642bafecc999325935279fb48`. ContentGraph builds read-only, deterministic content relationship evidence. Its native dependency is Kujo. The review covered source discovery, SiteProbe and SearchBridge contracts, other adapters, scoring and reporting, incremental state, exports, offline capabilities, telemetry, packaging, CI, examples, and generated artifacts.
+
+The baseline passed `bash scripts/validate.sh` with the checksum-verified Kujo 1.0.1 and 1.2.0 release binaries. The suite covered both native execution paths, 21 JSON Schemas, deterministic artifacts, and the generated demo. The paths under review need no model, network service, database, MCP tool registration, or application server.
+
+| Priority | Finding | Evidence and fix |
+| --- | --- | --- |
+| P0 | Incremental reuse accepted unbound cache files and ignored changed resource limits. | CLI inspection and build share manifest validation for known regular artifacts. Whole-run reuse checks ordered inputs and recorded budgets. Legacy runs without a manifest can still be inspected, while incremental builds rebuild from the supplied inputs. Regression fixtures cover missing digests, extension names, legacy upgrade and budget changes. |
+| P0 | Whole-run copy could fail below the run size cap, and a late publication error could leave a partial staging directory. | Native file copies preserve bytes without reading through Kujo's single-text-read limit. The engine checks staged integrity and aggregate bytes before promotion and cleans up on publication errors. GraphML export uses atomic replacement and preserves its force contract. |
+| P1 | Adapter fingerprinting hashed each file again and source discovery accumulated too many candidates before applying its node cap. | Adapter fingerprinting reuses byte-accounted file receipts. Source traversal applies the same candidate cap during enumeration. Cold and warm fixtures retain existing cache behavior and golden artifacts. |
+
+On local Apple Silicon with exact Kujo 1.0.1, seven alternating runs of a fixed sitemap fixture with 4 MiB of trailing whitespace produced identical artifact digests. Median wall time changed from 203.577 ms to 180.183 ms. Sample ranges were 200.827–226.385 ms and 178.121–191.517 ms. A synthetic prior run with a 9,760,479-byte manifest-bound report hit the baseline runtime's 8 MiB read limit. The updated client reused the run and reproduced every artifact byte. No peak-memory or token reduction was measured.
+
+The CLI names, flags, schema versions, config keys, output names, network capabilities, evidence labels and node identity rules are unchanged. Optional missing legacy cache data can be regenerated. Run manifests provide local integrity checks. Store prior runs and export destinations in trusted locations. The current filesystem API does not isolate callers from another process that actively replaces output ancestors. No upstream dependency change was needed.
+
+Verification passed on exact Kujo 1.0.1 and a Kujo 1.10.0 debug build with `KUJO_BIN=<runtime> bash scripts/validate.sh`. Two runs of `kujo run scripts/package-release.kujo` under 1.0.1 produced the same archive, SBOM, provenance and checksum manifest. Both sets passed `shasum -a 256 -c SHA256SUMS`. A clean archive launched `doctor --json` and rebuilt the three-node golden run byte for byte. Platform workflow execution and release publishing are exercised separately by hosted CI.
