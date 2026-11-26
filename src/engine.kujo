@@ -1,5 +1,5 @@
 from src.text import stable_id, tokens_with_profile, array_has
-from src.ingest import value_or, consume_input, source_files, ingest_source, ingest_siteprobe, ingest_sitemap, ingest_csv, ingest_cms, add_search_associations
+from src.ingest import value_or, consume_input, ingest_source, ingest_accounted_adapter, add_search_associations
 from src.analytics import analyze_graph
 from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, vector_cache_entry_schema, adapter_cache_entry_schema, telemetry_schema
 
@@ -163,19 +163,19 @@ func load_vector_cache(run) {
     return result
 }
 
-func adapter_files(adapter, input) {
-    if adapter=="source" { if !path_exists(input){return []};files:=source_files(input,""); paths:=[];for item in files{paths=push(paths,item["path"])};return paths }
-    if adapter=="siteprobe" { return [path_join(input,"pages.jsonl"),path_join(input,"links.json")] }
-    return [input]
-}
-
-func adapter_fingerprint(adapter,input,paths) {
-    records:=[]
+func prepare_adapter(adapter, input, budget) {
+    paths := [input]
+    if adapter == "siteprobe" { paths = [path_join(input,"pages.jsonl"), path_join(input,"links.json")] }
+    records := []
     for path in paths {
-        if !path_is_file(path) { return "" }
-        records=push(records,replace_str(path,"\\","/")+":"+to_string(file_size(path))+":"+sha256_file(path))
+        if !path_is_file(path) { fail(adapter+" input file not found: "+basename(path)) }
+        if adapter == "siteprobe" && path_is_symlink(path) { fail("SiteProbe run artifact must be a regular file: "+basename(path)) }
+        budget = consume_input(budget,path,false)
+        receipt := budget["files"][len(budget["files"])-1]
+        records = push(records, receipt["path"]+":"+to_string(receipt["bytes"])+":"+receipt["sha256"])
     }
-    return sha256(adapter+"\n"+replace_str(input,"\\","/")+"\n"+join(sort(records),"\n"))
+    fingerprint_value := sha256(adapter+"\n"+replace_str(input,"\\","/")+"\n"+join(sort(records),"\n"))
+    return {"budget":budget,"fingerprint":fingerprint_value}
 }
 
 func load_adapter_cache(run) {
@@ -191,12 +191,35 @@ func load_adapter_cache(run) {
     return result
 }
 
-func validate_incremental_integrity(run) {
-    if run==""{return}
-    manifest_path:=path_join(run,"manifest.json")
-    if !path_is_file(manifest_path){return}
-    manifest:=validate_contract(parse_json(read_file(manifest_path)),manifest_schema(),"incremental manifest")
-    for name in keys(manifest["artifacts"]){path:=path_join(run,name);if !path_is_file(path)||sha256_file(path)!=manifest["artifacts"][name]{fail("incremental artifact integrity check failed: "+name)}}
+func link_exists(path) {
+    try { return path_is_symlink(path) } except error { return false }
+}
+
+func verify_run_manifest(run) {
+    manifest_path := path_join(run,"manifest.json")
+    if link_exists(manifest_path) { fail("run manifest must be a regular file") }
+    if !path_is_file(manifest_path) {
+        if path_exists(manifest_path) { fail("run manifest must be a regular file") }
+        return null
+    }
+    manifest := validate_contract(parse_json(read_file(manifest_path)),manifest_schema(),"stored manifest")
+    hashes := manifest["artifacts"]
+    for name in keys(hashes) {
+        if name == "manifest.json" || (!array_has(ARTIFACT_NAMES,name) && name != "telemetry.json") {
+            fail("manifest contains an unsupported artifact name")
+        }
+    }
+    for name in concat(ARTIFACT_NAMES,["telemetry.json"]) {
+        if name == "manifest.json" { continue }
+        path := path_join(run,name)
+        if link_exists(path) { fail("run artifact must be a regular file: "+name) }
+        if has_key(hashes,name) == 0 {
+            if path_exists(path) { fail("manifest does not bind run artifact: "+name) }
+            continue
+        }
+        if !path_is_file(path) || sha256_file(path) != hashes[name] { fail("artifact integrity check failed: "+name) }
+    }
+    return manifest
 }
 
 func cached_adapter(cache,adapter,input,fingerprint_value) {
@@ -421,30 +444,65 @@ func write_artifact_chunks(path, content) {
     }
 }
 
-func publish_artifacts(out, artifacts, maximum) {
-    if path_exists(out) { fail("output path already exists: " + out) }
+func copy_incremental_run(out, previous, manifest, maximum) {
+    if path_exists(out) || link_exists(out) { fail("output path already exists: "+out) }
+    hashes := manifest["artifacts"]
+    names := ARTIFACT_NAMES
+    missing_adapter := has_key(hashes,"adapter-cache.jsonl") == 0
+    replacement_manifest := ""
+    if missing_adapter {
+        hashes["adapter-cache.jsonl"] = sha256("")
+        replacement_manifest = render_json({"schema":"contentgraph.manifest/v1","artifacts":hashes})
+    }
+    total := 0
+    for name in names {
+        if missing_adapter && name == "adapter-cache.jsonl" { continue }
+        if missing_adapter && name == "manifest.json" { total = total + len(replacement_manifest); continue }
+        path := path_join(previous,name)
+        if !path_is_file(path) || path_is_symlink(path) { fail("invalid incremental run, missing regular artifact: "+name) }
+        total = total + file_size(path)
+        if total > maximum { fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)") }
+    }
+    if total > maximum { fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)") }
     parent := dirname(out)
     create_dir(parent)
-    staging := path_join(parent, "." + basename(out) + ".tmp-" + uuid_v4())
+    staging := path_join(parent,"."+basename(out)+".tmp-"+uuid_v4())
     create_dir(staging)
-    names := sort(keys(artifacts))
-    total := 0
+    problem := ""
     try {
+        copied_bytes := 0
         for name in names {
-            path := path_join(staging, name)
-            write_artifact_chunks(path,artifacts[name])
-            total = total + file_size(path)
+            destination := path_join(staging,name)
+            if missing_adapter && name == "adapter-cache.jsonl" { write_file(destination,""); continue }
+            if missing_adapter && name == "manifest.json" {
+                write_file(destination,replacement_manifest)
+                copied_bytes = copied_bytes + file_size(destination)
+                continue
+            }
+            input_path := path_join(previous,name)
+            if path_is_symlink(input_path) { problem = "incremental artifact changed during copy: "+name; break }
+            copy_file(input_path,destination)
+            copied_bytes = copied_bytes + file_size(destination)
+            valid := false
+            if name == "manifest.json" {
+                valid = canonical_json(parse_json(read_file(destination))) == canonical_json(manifest)
+            } else {
+                valid = sha256_file(destination) == hashes[name]
+            }
+            if !valid {
+                problem = "incremental artifact changed during copy: "+name
+                break
+            }
+        }
+        if problem == "" && copied_bytes > maximum { problem = "output budget exceeded ("+to_string(copied_bytes)+" > "+to_string(maximum)+" bytes)" }
+        if problem == "" {
+            if path_exists(out) || link_exists(out) { problem = "output path already exists: "+out }
+            else { rename_file(staging,out) }
         }
     } except error {
-        cleanup_staging(staging,names)
-        fail("artifact write failed: "+substring(to_string(error),0,min(200,len(to_string(error)))))
+        problem = "incremental artifact write failed: "+substring(to_string(error),0,min(200,len(to_string(error))))
     }
-    if total > maximum {
-        cleanup_staging(staging, names)
-        fail("output budget exceeded (" + to_string(total) + " > " + to_string(maximum) + " bytes)")
-    }
-    rename_file(staging, out)
-    return total
+    if problem != "" { cleanup_staging(staging,names); fail(problem) }
 }
 
 func write_json_array_stream(path,prefix,values,suffix) {
@@ -480,10 +538,12 @@ func write_analysis_stream(path,analysis) {
 }
 
 func publish_value_artifacts(out,values,report,vector_cache,adapter_entries,telemetry,maximum) {
-    if path_exists(out){fail("output path already exists: "+out)}
+    if path_exists(out) || link_exists(out) { fail("output path already exists: "+out) }
     parent:=dirname(out);create_dir(parent);staging:=path_join(parent,"."+basename(out)+".tmp-"+uuid_v4());create_dir(staging)
     names:=["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","analysis.json","metadata.json","report.md","vector-cache.jsonl","adapter-cache.jsonl"]
     if telemetry!=null{names=push(names,"telemetry.json")}
+    staged_names := push(names,"manifest.json")
+    total := 0
     try {
         write_graph_stream(path_join(staging,"graph.json"),values["graph"],values["edges"])
         write_jsonl_stream(path_join(staging,"nodes.jsonl"),values["nodes"])
@@ -498,13 +558,34 @@ func publish_value_artifacts(out,values,report,vector_cache,adapter_entries,tele
         write_jsonl_stream(path_join(staging,"vector-cache.jsonl"),vector_cache)
         write_jsonl_stream(path_join(staging,"adapter-cache.jsonl"),adapter_entries)
         if telemetry!=null{write_artifact_chunks(path_join(staging,"telemetry.json"),render_json(telemetry))}
-    } except error { cleanup_staging(staging,names);fail("artifact write failed: "+substring(to_string(error),0,min(200,len(to_string(error))))) }
-    total:=0;hashes:={}
-    for name in sort(names){path:=path_join(staging,name);total=total+file_size(path);if total>maximum{cleanup_staging(staging,names);fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)")};hashes[name]=sha256_file(path)}
-    manifest:=validate_contract({"schema":"contentgraph.manifest/v1","artifacts":hashes},manifest_schema(),"manifest artifact")
-    write_artifact_chunks(path_join(staging,"manifest.json"),render_json(manifest));names=push(names,"manifest.json");total=total+file_size(path_join(staging,"manifest.json"))
-    if total>maximum{cleanup_staging(staging,names);fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)")}
-    rename_file(staging,out);return total
+        hashes := {}
+        for name in sort(names) {
+            path := path_join(staging,name)
+            total = total + file_size(path)
+            if total > maximum {
+                cleanup_staging(staging,staged_names)
+                fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)")
+            }
+            hashes[name] = sha256_file(path)
+        }
+        manifest := validate_contract({"schema":"contentgraph.manifest/v1","artifacts":hashes},manifest_schema(),"manifest artifact")
+        manifest_path := path_join(staging,"manifest.json")
+        write_artifact_chunks(manifest_path,render_json(manifest))
+        total = total + file_size(manifest_path)
+        if total > maximum {
+            cleanup_staging(staging,staged_names)
+            fail("output budget exceeded ("+to_string(total)+" > "+to_string(maximum)+" bytes)")
+        }
+        if path_exists(out) || link_exists(out) {
+            cleanup_staging(staging,staged_names)
+            fail("output path already exists: "+out)
+        }
+        rename_file(staging,out)
+    } except error {
+        cleanup_staging(staging,staged_names)
+        fail("artifact write failed: "+substring(to_string(error),0,min(200,len(to_string(error)))))
+    }
+    return total
 }
 
 func input_fingerprint(budget, options) {
@@ -514,26 +595,21 @@ func input_fingerprint(budget, options) {
     return sha256(join(sort(records), "\n") + "\n" + canonical_json(settings))
 }
 
-func try_incremental(options, fingerprint_value) {
+func try_incremental(options, fingerprint_value, manifest) {
     previous := options["incremental_from"]
-    if previous == "" { return false }
-    if options["telemetry"] { return false }
-    metadata_path := path_join(previous, "metadata.json")
-    if !path_is_file(metadata_path) { fail("invalid incremental run: " + previous) }
-    metadata := parse_json(read_file(metadata_path))
-    if has_key(metadata, "cache") == 0 || value_or(metadata["cache"], "input_fingerprint", "") != fingerprint_value { return false }
-    artifacts := {}
-    incremental_names:=ARTIFACT_NAMES
-    # 0.2 runs predate the adapter cache. Copy their immutable artifacts and
-    # synthesize an empty v1 cache so exact-input reuse remains compatible.
-    if !path_is_file(path_join(previous,"adapter-cache.jsonl")) { incremental_names=[];for name in ARTIFACT_NAMES{if name!="adapter-cache.jsonl"{incremental_names=push(incremental_names,name)}} }
-    for name in incremental_names {
-        path := path_join(previous, name)
-        if !path_is_file(path) { fail("invalid incremental run, missing: " + name) }
-        artifacts[name] = read_file(path)
+    if previous == "" || manifest == null || options["telemetry"] { return false }
+    if has_key(manifest["artifacts"],"telemetry.json") { return false }
+    metadata_path := path_join(previous,"metadata.json")
+    if !path_is_file(metadata_path) { fail("invalid incremental run: "+previous) }
+    metadata := validate_contract(parse_json(read_file(metadata_path)),metadata_schema(),"incremental metadata")
+    if value_or(metadata["cache"],"input_fingerprint","") != fingerprint_value { return false }
+    for name in ["source","siteprobe","searchbridge","sitemap","csv","cms"] {
+        if canonical_json(value_or(metadata["inputs"],name,[])) != canonical_json(options[name]) { return false }
     }
-    if has_key(artifacts,"adapter-cache.jsonl")==0 { artifacts["adapter-cache.jsonl"]="" }
-    publish_artifacts(options["out"], artifacts, options["max_output_bytes"])
+    for name in ["max_nodes","max_input_bytes","max_output_bytes","max_report_tokens","max_candidate_pairs","max_related_per_node","max_analysis_items"] {
+        if value_or(metadata["budgets"],name,null) != options[name] { return false }
+    }
+    copy_incremental_run(options["out"],previous,manifest,options["max_output_bytes"])
     return true
 }
 
@@ -541,40 +617,48 @@ func build_graph(options) {
     build_started:=performance_now()
     total_inputs := len(options["source"])+len(options["siteprobe"])+len(options["sitemap"])+len(options["csv"])+len(options["cms"])
     if total_inputs == 0 { fail("build requires source, siteprobe, sitemap, csv, or cms input") }
-    validate_incremental_integrity(options["incremental_from"])
+    previous := options["incremental_from"]
+    manifest := null
+    if previous != "" { manifest = verify_run_manifest(previous) }
+    cache_root := ""
+    if manifest != null { cache_root = previous }
     budget := {"used":0,"maximum":options["max_input_bytes"],"files":[]}
     groups := []
     existing_edges := []
-    result := null
-    adapter_cache:=load_adapter_cache(options["incremental_from"]); adapter_cache_entries:=[];adapter_cache_hits:=0;adapter_cache_misses:=0
-    for path in options["siteprobe"] {
-        paths:=adapter_files("siteprobe",path);fp:=adapter_fingerprint("siteprobe",path,paths);cached:=cached_adapter(adapter_cache,"siteprobe",path,fp)
-        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 }
-        else { result=ingest_siteprobe(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
-        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("siteprobe",path,fp,result));groups=push(groups,result["nodes"]);existing_edges=concat(existing_edges,result["edges"])
-    }
-    for path in options["source"] { result = ingest_source(path,budget,options["max_nodes"]); budget=result["budget"]; groups=push(groups,result["nodes"]) }
-    for path in options["sitemap"] {
-        paths:=adapter_files("sitemap",path);fp:=adapter_fingerprint("sitemap",path,paths);cached:=cached_adapter(adapter_cache,"sitemap",path,fp)
-        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 } else { result=ingest_sitemap(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
-        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("sitemap",path,fp,result));groups=push(groups,result["nodes"])
-    }
-    for path in options["csv"] {
-        paths:=adapter_files("csv",path);fp:=adapter_fingerprint("csv",path,paths);cached:=cached_adapter(adapter_cache,"csv",path,fp)
-        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 } else { result=ingest_csv(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
-        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("csv",path,fp,result));groups=push(groups,result["nodes"])
-    }
-    for path in options["cms"] {
-        paths:=adapter_files("cms",path);fp:=adapter_fingerprint("cms",path,paths);cached:=cached_adapter(adapter_cache,"cms",path,fp)
-        if cached!=null { for input_path in paths{budget=consume_input(budget,input_path,false)};result={"nodes":cached["nodes"],"edges":cached["edges"],"budget":budget};adapter_cache_hits=adapter_cache_hits+1 } else { result=ingest_cms(path,budget,options["max_nodes"]);budget=result["budget"];adapter_cache_misses=adapter_cache_misses+1 }
-        adapter_cache_entries=push(adapter_cache_entries,adapter_cache_entry("cms",path,fp,result));groups=push(groups,result["nodes"])
+    adapter_cache := load_adapter_cache(cache_root)
+    adapter_cache_entries := []
+    adapter_cache_hits := 0
+    adapter_cache_misses := 0
+    for adapter in ["siteprobe","source","sitemap","csv","cms"] {
+        for path in options[adapter] {
+            if adapter == "source" {
+                result := ingest_source(path,budget,options["max_nodes"])
+                budget = result["budget"]
+                groups = push(groups,result["nodes"])
+                continue
+            }
+            prepared := prepare_adapter(adapter,path,budget)
+            budget = prepared["budget"]
+            fingerprint_value := prepared["fingerprint"]
+            result := cached_adapter(adapter_cache,adapter,path,fingerprint_value)
+            if result == null {
+                result = ingest_accounted_adapter(adapter,path,budget,options["max_nodes"])
+                adapter_cache_misses = adapter_cache_misses + 1
+            } else {
+                if len(result["nodes"]) > options["max_nodes"] { fail("node cap exceeded while reading "+adapter+" cache") }
+                adapter_cache_hits = adapter_cache_hits + 1
+            }
+            adapter_cache_entries = push(adapter_cache_entries,adapter_cache_entry(adapter,path,fingerprint_value,result))
+            groups = push(groups,result["nodes"])
+            if adapter == "siteprobe" { existing_edges = concat(existing_edges,result["edges"]) }
+        }
     }
     nodes := merge_nodes(groups, options["max_nodes"])
     groups=[]
     search_result := add_search_associations(options["searchbridge"], nodes, budget)
     search_edges := search_result["edges"]; nodes=search_result["nodes"]; budget=search_result["budget"]
     fingerprint_value := input_fingerprint(budget, options)
-    if try_incremental(options, fingerprint_value) {
+    if try_incremental(options, fingerprint_value, manifest) {
         print(to_json({"run":options["out"],"cache":"hit"}))
         return 0
     }
@@ -582,7 +666,7 @@ func build_graph(options) {
     node_map := {}
     for node in nodes { node_map[node["id"]]=node }
     ids := sort(keys(node_map))
-    vector_data := build_vectors(nodes, options["max_term_document_frequency_ratio"], load_vector_cache(options["incremental_from"]), options["tokenizer_profile"])
+    vector_data := build_vectors(nodes, options["max_term_document_frequency_ratio"], load_vector_cache(cache_root), options["tokenizer_profile"])
     similarity := streaming_similarity(ids, vector_data, options)
     similarities := similarity["similarities"]
     cluster_result := build_clusters(ids, similarity["parent"], vector_data["signals"], node_map)
@@ -677,3 +761,4 @@ export build_graph := build_graph
 export validate_artifacts := validate_artifacts
 export render_json := render_json
 export fail := fail
+export verify_run_manifest := verify_run_manifest

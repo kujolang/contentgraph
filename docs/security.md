@@ -3,14 +3,20 @@
 - ContentGraph performs no network requests and never mutates source inputs.
 - Source roots and run paths are resolved before reads; symlinked files escaping a supplied root are ignored.
 - Discovery excludes `.git`, dependency, generated-output, and private WebOps history directories by default.
-- Files are capped at 5 MiB and total input nodes at 20,000.
+- Source files are capped at 5 MiB and total graph nodes at 20,000. Source
+  discovery stops at the requested node limit. Structured adapter files count
+  against the aggregate input budget before hashing or parsing.
 - Aggregate input bytes, sparse candidate pairs, retained relationships, output
   bytes, and report size are independently bounded.
 - SearchBridge inputs are normalized result artifacts, not credential files.
 - Large JSON and JSONL artifacts are validated in bounded batches, streamed to
   a private staging directory, hashed, budget-checked, and promoted only as a
   complete new run. Existing output paths are
-  rejected, and exports require `--force` before overwriting a file.
+  rejected, and exports use an atomic write and require `--force` to overwrite
+  a file. Manifest-backed inspection and reuse verify the known regular
+  artifacts against their recorded SHA-256 digests. Keep prior runs in a
+  trusted location. The manifest detects inconsistent bytes and carries no
+  signature.
 - Local node artifacts store portable relative source paths instead of absolute
   workstation paths. Source content is never copied verbatim into reports.
 - `vector-cache.jsonl` stores normalized terms, never source bodies. It can

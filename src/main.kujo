@@ -1,5 +1,5 @@
-from src.engine import METHOD, ARTIFACT_NAMES, build_graph, fail, render_json
-from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, manifest_schema, doctor_schema, config_schema, explanation_schema, sarif_schema
+from src.engine import METHOD, ARTIFACT_NAMES, build_graph, fail, render_json, verify_run_manifest
+from src.contracts import validate_contract, node_schema, edge_schema, graph_schema, wrapper_schema, metadata_schema, analysis_schema, doctor_schema, config_schema, explanation_schema, sarif_schema
 
 VERSION := "0.3.0"
 LEGACY_ARTIFACTS := ["graph.json","nodes.jsonl","edges.jsonl","clusters.json","overlaps.json","orphan-candidates.json","link-opportunities.json","metadata.json","report.md"]
@@ -104,15 +104,11 @@ func jsonl(path) {
 }
 
 func validate_run(run) {
-    for name in LEGACY_ARTIFACTS { if !path_is_file(path_join(run,name)) { fail("invalid ContentGraph run, missing: "+name) } }
-    manifest_path:=path_join(run,"manifest.json")
-    if path_is_file(manifest_path) {
-        manifest:=validate_contract(parse_json(read_file(manifest_path)),manifest_schema(),"stored manifest")
-        for name in keys(manifest["artifacts"]) {
-            path:=path_join(run,name)
-            if !path_is_file(path) || sha256_file(path)!=manifest["artifacts"][name] { fail("artifact integrity check failed: "+name) }
-        }
+    for name in LEGACY_ARTIFACTS {
+        path := path_join(run,name)
+        if !path_is_file(path) || path_is_symlink(path) { fail("invalid ContentGraph run, missing regular artifact: "+name) }
     }
+    verify_run_manifest(run)
     graph:=validate_contract(parse_json(read_file(path_join(run,"graph.json"))),graph_schema(),"stored graph")
     nodes:=jsonl(path_join(run,"nodes.jsonl")); offset:=0
     loop { if offset>=len(nodes){break}; validate_contract(slice(nodes,offset,min(offset+500,len(nodes))),{"type":"array","items":node_schema()},"stored nodes"); offset=offset+500 }
@@ -179,7 +175,7 @@ func graphml(run_data) {
 
 func write_export(path,text,force) {
     if path_exists(path) && !force { fail("export destination exists (use --force): "+path) }
-    create_dir(dirname(path)); write_file(path,text,force)
+    create_dir(dirname(path)); write_file_atomic(path,text,force)
 }
 
 func read_wrapper_items(run,name,field) { return parse_json(read_file(path_join(run,name)))[field] }

@@ -73,7 +73,9 @@ Adapter contract names are recorded in `metadata.json`. Incremental builds use
 `--incremental-from RUN`; the cache fingerprint covers scoring and tokenizer
 settings plus the path, byte count, and SHA-256 digest of every input
 dependency. SiteProbe, sitemap, CSV, and CMS adapters independently reuse parsed
-results when only part of a combined input set changes.
+results when only part of a combined input set changes. Whole-run reuse also
+checks the input order and resource limits. A pre-manifest run can still be
+inspected. Incremental builds from that run rebuild from the supplied inputs.
 
 ## Commands
 

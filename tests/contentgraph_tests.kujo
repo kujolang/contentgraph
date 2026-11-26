@@ -85,6 +85,10 @@ legacy:=path_join(root,"legacy");create_dir(legacy)
 for name in ARTIFACTS { if name!="analysis.json" && name!="manifest.json" && name!="vector-cache.jsonl" && name!="adapter-cache.jsonl" { copy_file(path_join(first,name),path_join(legacy,name)) } }
 run_cli(["orphans",legacy],0)
 run_cli(["analysis",legacy],1)
+legacy_rebuild := path_join(root,"legacy-rebuild")
+legacy_result := run_cli(["build","--source","fixtures/source","--incremental-from",legacy,"--out",legacy_rebuild,"--overlap-threshold","0.25","--deterministic","--json"],0)
+check_equal(parse_json(legacy_result.stdout)["cache"],"miss")
+run_cli(["orphans",legacy_rebuild],0)
 
 # Config precedence and unknown-key rejection.
 config:=path_join(root,"config.toml")
@@ -104,6 +108,14 @@ check_equal(adapter_metadata["usage"]["adapter_cache_hits"],0);check_equal(adapt
 graphml_result:=run_cli(["export",adapter_run,"--format","graphml"],0)
 graphml:=graphml_result.stdout
 check_true(contains(graphml,"search-query")>0); check_true(contains(graphml,"query:")>0); check_true(contains(graphml,"deterministic content graph")>0)
+export_path := path_join(root,"export.graphml")
+export_args := ["export",adapter_run,"--format","graphml","--out",export_path]
+write_file(export_path,"existing")
+run_cli(export_args,1)
+check_equal(read_file(export_path),"existing")
+run_cli(concat(export_args,["--force"]),0)
+check_true(contains(read_file(export_path),"deterministic content graph")>0)
+delete_file(export_path)
 
 # Per-adapter partial cache reuse (SiteProbe, sitemap, CSV, CMS).
 changed_csv:=path_join(root,"content-changed.csv")
@@ -142,6 +154,40 @@ incremental:=path_join(root,"incremental")
 cache_result:=run_cli(["build","--source","fixtures/source","--out",incremental,"--incremental-from",first,"--overlap-threshold","0.25","--deterministic","--json"],0)
 check_equal(parse_json(cache_result.stdout)["cache"],"hit")
 for name in ARTIFACTS { check_equal(sha256_file(path_join(first,name)),sha256_file(path_join(incremental,name))) }
+budget_run := path_join(root,"changed-budget")
+budget_args := ["build","--source","fixtures/source","--incremental-from",first,"--overlap-threshold","0.25","--deterministic","--json"]
+budget_result := run_cli(concat(budget_args,["--out",budget_run,"--max-output-bytes","1048576"]),0)
+check_equal(parse_json(budget_result.stdout)["cache"],"miss")
+check_equal(parse_json(read_file(path_join(budget_run,"metadata.json")))["budgets"]["max_output_bytes"],1048576)
+
+previous := path_join(root,"legacy-cache")
+create_dir(previous)
+for name in ARTIFACTS { if name != "adapter-cache.jsonl" { copy_file(path_join(first,name),path_join(previous,name)) } }
+manifest_path := path_join(previous,"manifest.json")
+manifest := parse_json(read_file(manifest_path))
+legacy_hashes := {}
+for name in keys(manifest["artifacts"]) {
+    if name != "adapter-cache.jsonl" { legacy_hashes[name] = manifest["artifacts"][name] }
+}
+manifest["artifacts"] = legacy_hashes
+write_file(manifest_path,to_json(manifest),true)
+upgraded := path_join(root,"upgraded-cache")
+upgraded_args := ["build","--source","fixtures/source","--incremental-from",previous,"--overlap-threshold","0.25","--deterministic","--json"]
+check_equal(parse_json(run_cli(concat(upgraded_args,["--out",upgraded]),0).stdout)["cache"],"hit")
+upgraded_hashes := parse_json(read_file(path_join(upgraded,"manifest.json")))["artifacts"]
+check_equal(upgraded_hashes["adapter-cache.jsonl"],sha256_file(path_join(upgraded,"adapter-cache.jsonl")))
+run_cli(["orphans",upgraded],0)
+
+# A present artifact must be recorded, and extension names are validated.
+copy_file(path_join(first,"adapter-cache.jsonl"),path_join(previous,"adapter-cache.jsonl"))
+check_true(contains(run_cli(["orphans",previous],1).stderr,"manifest does not bind run artifact")>0)
+check_true(contains(run_cli(concat(upgraded_args,["--out",path_join(root,"unbound-cache")]),1).stderr,"manifest does not bind run artifact")>0)
+check_false(path_exists(path_join(root,"unbound-cache")))
+legacy_hashes["notes.txt"] = sha256("")
+manifest["artifacts"] = legacy_hashes
+write_file(manifest_path,to_json(manifest),true)
+check_true(contains(run_cli(["orphans",previous],1).stderr,"unsupported artifact name")>0)
+
 changed_source:=path_join(root,"changed-source"); create_dir(changed_source)
 write_file(path_join(changed_source,"guide-a.md"),read_file("fixtures/source/guide-a.md")+"\nmaterial change\n")
 write_file(path_join(changed_source,"guide-b.md"),read_file("fixtures/source/guide-b.md"))
@@ -181,6 +227,10 @@ check_false(path_exists(path_join(first,"telemetry.json")))
 limited:=path_join(root,"limited")
 run_cli(["build","--source","fixtures/source","--out",limited,"--max-output-bytes","1024"],1)
 check_false(path_exists(limited))
+source_limited := path_join(root,"source-limited")
+source_limit_result := run_cli(["build","--source","fixtures/source","--out",source_limited,"--max-nodes","1"],1)
+check_true(contains(source_limit_result.stderr,"node cap exceeded")>0)
+check_false(path_exists(source_limited))
 run_cli(["build","--source",properties,"--out",path_join(root,"pair-limited"),"--max-candidate-pairs","1"],0)
 dense:=path_join(root,"dense");create_dir(dense)
 for i in range(0,20){write_file(path_join(dense,"page-"+to_string(i)+".md"),"---\nurl: https://example.com/dense-"+to_string(i)+"\n---\n# Shared\n\ncommon terms across every page")}
@@ -212,7 +262,7 @@ demo_build:=spawn_process([kujo_bin,"run","scripts/build-demo.kujo","--","--out"
 check_equal(demo_build.exitcode,0);check_equal(sha256_file(demo_out),sha256_file("demo/index.html"));check_true(contains(read_file(demo_out),"fixtures/golden/run/nodes.jsonl")>0);check_true(contains(read_file(demo_out),"src/engine.kujo")>0)
 
 # Clean UUID-scoped temporary artifacts.
-for path in [first,second,path_join(root,"config-run"),adapter_run,adapter_warm,incremental,changed,property_run,unicode_run,path_join(root,"pair-limited"),corrupt,immutability] { cleanup_run(path) }
+for path in [first,second,path_join(root,"config-run"),adapter_run,adapter_warm,incremental,legacy_rebuild,budget_run,previous,upgraded,changed,property_run,unicode_run,path_join(root,"pair-limited"),corrupt,immutability] { cleanup_run(path) }
 for path in vendor_runs { cleanup_run(path) }
 if path_exists(path_join(telemetry_run,"telemetry.json")){delete_file(path_join(telemetry_run,"telemetry.json"))};cleanup_run(telemetry_run)
 legacy_artifacts:=[];for name in ARTIFACTS{if name!="analysis.json"&&name!="manifest.json"&&name!="vector-cache.jsonl"&&name!="adapter-cache.jsonl"{legacy_artifacts=push(legacy_artifacts,name)}};cleanup_files(legacy,legacy_artifacts)

@@ -31,12 +31,13 @@ func consume_input(budget, path, per_file) {
     return budget
 }
 
-func source_files(root, relative) {
+func discover_source_files(root, relative, max_nodes) {
     if path_is_file(root) {
         return [{"path":root, "relative":basename(root)}]
     }
     pending := [{"path":root,"relative":relative}]
     discovered := {}
+    discovered_count := 0
     cursor:=0
     loop {
         if cursor>=len(pending){break}
@@ -48,13 +49,22 @@ func source_files(root, relative) {
             if directory["relative"] != "" { rel = directory["relative"] + "/" + name }
             if path_is_symlink(path) { continue }
             if path_is_dir(path) { pending=push(pending,{"path":path,"relative":rel}) }
-            else if path_is_file(path) && list_has(SOURCE_EXTENSIONS, lower(path_extension(path))) { discovered[rel]=path }
+            else if path_is_file(path) && list_has(SOURCE_EXTENSIONS, lower(path_extension(path))) {
+                discovered_count = discovered_count + 1
+                if max_nodes > 0 && discovered_count > max_nodes {
+                    eprint("ContentGraph: node cap exceeded while reading source: " + root)
+                    exit(1)
+                }
+                discovered[rel] = path
+            }
         }
     }
     names:=sort(keys(discovered));results:=range(0,len(names));index:=0
     for name in names{results[index]={"path":discovered[name],"relative":name};index=index+1}
     return results
 }
+
+func source_files(root, relative) { return discover_source_files(root,relative,0) }
 
 func make_node(identity, title, text, fields) {
     node := {
@@ -91,7 +101,7 @@ func ingest_source(root, budget, max_nodes) {
         exit(1)
     }
     nodes := []
-    for item in source_files(root, "") {
+    for item in discover_source_files(root,"",max_nodes) {
         budget = consume_input(budget, item["path"], true)
         raw := read_file_lossy(item["path"])
         parsed := parse_frontmatter(raw)
@@ -112,20 +122,19 @@ func ingest_source(root, budget, max_nodes) {
             "last_material_update":value_or(meta, "last_updated", value_or(meta, "date", ""))
         }
         nodes = push(nodes, make_node(identity, title_from_text(item["path"], meta, body), text, fields))
-        if len(nodes) > max_nodes { eprint("ContentGraph: node cap exceeded while reading source: " + root); exit(1) }
     }
     return {"nodes":nodes, "edges":[], "budget":budget}
 }
 
-func ingest_siteprobe(run, budget, max_nodes) {
+func parse_siteprobe(run, budget, max_nodes, accounted) {
     pages_path := path_join(run, "pages.jsonl")
     links_path := path_join(run, "links.json")
     if !path_is_file(pages_path) || !path_is_file(links_path) {
         eprint("ContentGraph: invalid SiteProbe run: " + run)
         exit(1)
     }
-    budget = consume_input(budget, pages_path, false)
-    budget = consume_input(budget, links_path, false)
+    if !accounted { budget = consume_input(budget, pages_path, false) }
+    if !accounted { budget = consume_input(budget, links_path, false) }
     nodes := []
     for line in read_lines(pages_path) {
         if trim(line) == "" { continue }
@@ -168,9 +177,11 @@ func ingest_siteprobe(run, budget, max_nodes) {
     return {"nodes":nodes, "edges":edges, "budget":budget}
 }
 
-func ingest_sitemap(path, budget, max_nodes) {
+func ingest_siteprobe(run, budget, max_nodes) { return parse_siteprobe(run, budget, max_nodes, false) }
+
+func parse_sitemap(path, budget, max_nodes, accounted) {
     if !path_is_file(path) { eprint("ContentGraph: sitemap not found: " + path); exit(1) }
-    budget = consume_input(budget, path, false)
+    if !accounted { budget = consume_input(budget, path, false) }
     xml := read_file_lossy(path)
     urls := regex_find_all(xml, "(?is)<loc>.*?</loc>")
     nodes := []
@@ -186,9 +197,11 @@ func ingest_sitemap(path, budget, max_nodes) {
     return {"nodes":nodes, "edges":[], "budget":budget}
 }
 
-func ingest_csv(path, budget, max_nodes) {
+func ingest_sitemap(path, budget, max_nodes) { return parse_sitemap(path, budget, max_nodes, false) }
+
+func parse_csv_export(path, budget, max_nodes, accounted) {
     if !path_is_file(path) { eprint("ContentGraph: CSV export not found: " + path); exit(1) }
-    budget = consume_input(budget, path, false)
+    if !accounted { budget = consume_input(budget, path, false) }
     rows := parse_csv(read_file_lossy(path))
     nodes := range(0,len(rows)); row_index:=0
     for row in rows {
@@ -209,9 +222,11 @@ func ingest_csv(path, budget, max_nodes) {
     return {"nodes":nodes, "edges":[], "budget":budget}
 }
 
-func ingest_cms(path, budget, max_nodes) {
+func ingest_csv(path, budget, max_nodes) { return parse_csv_export(path, budget, max_nodes, false) }
+
+func parse_cms(path, budget, max_nodes, accounted) {
     if !path_is_file(path) { eprint("ContentGraph: CMS export not found: " + path); exit(1) }
-    budget = consume_input(budget, path, false)
+    if !accounted { budget = consume_input(budget, path, false) }
     doc := validate_contract(parse_json(read_file(path)), cms_schema(), "CMS export")
     nodes := []
     for entry in doc["entries"] {
@@ -225,6 +240,8 @@ func ingest_cms(path, budget, max_nodes) {
     }
     return {"nodes":nodes, "edges":[], "budget":budget}
 }
+
+func ingest_cms(path, budget, max_nodes) { return parse_cms(path, budget, max_nodes, false) }
 
 func add_search_associations(paths, nodes, budget) {
     edges := []
@@ -254,6 +271,14 @@ func add_search_associations(paths, nodes, budget) {
     return {"edges":edges, "nodes":nodes, "budget":budget}
 }
 
+func ingest_accounted_adapter(adapter, path, budget, max_nodes) {
+    if adapter == "siteprobe" { return parse_siteprobe(path, budget, max_nodes, true) }
+    if adapter == "sitemap" { return parse_sitemap(path, budget, max_nodes, true) }
+    if adapter == "csv" { return parse_csv_export(path, budget, max_nodes, true) }
+    return parse_cms(path, budget, max_nodes, true)
+}
+
+export ingest_accounted_adapter := ingest_accounted_adapter
 export value_or := value_or
 export consume_input := consume_input
 export source_files := source_files
